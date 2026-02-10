@@ -3,13 +3,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "voxbridge"
+name = "voxbridge-io"
 version = "0.1.0"
 description = "Universal telephony adapter SDK for voice bots - connect any WebSocket voice bot to any telephony platform"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
-    { name = "VoxBridge Contributors" },
+    { name = "Sachin Chandra" },
 ]
 keywords = ["telephony", "voip", "sip", "websocket", "voice-bot", "twilio", "genesys", "avaya"]
 classifiers = [
