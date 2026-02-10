@@ -1,0 +1,27 @@
+# Fly.io deployment configuration for VoxBridge
+# Deploy with: fly launch && fly deploy
+
+app = "voxbridge"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  LOG_LEVEL = "INFO"
+
+[http_service]
+  internal_port = 8765
+  force_https = true
+  auto_stop_machines = false   # Keep running for WebSocket connections
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 100
+    soft_limit = 80
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

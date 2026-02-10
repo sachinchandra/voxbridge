@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  voxbridge:
+    build: .
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./bridge.yaml:/app/bridge.yaml:ro
+    environment:
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Example: your voice bot (uncomment and configure)
+  # bot:
+  #   image: your-voice-bot:latest
+  #   ports:
+  #     - "9000:9000"

@@ -1,0 +1,26 @@
+# VoxBridge Configuration - Config-Driven Example
+#
+# This example bridges Twilio Media Streams to a local voice bot.
+# Your voice bot should be running on ws://localhost:9000/ws
+# and accept binary PCM16 audio + JSON control messages.
+#
+# Run with: voxbridge run --config bridge.yaml
+
+provider:
+  type: twilio
+  listen_host: 0.0.0.0
+  listen_port: 8765
+  listen_path: /media-stream
+
+bot:
+  url: ws://localhost:9000/ws
+  codec: pcm16
+  sample_rate: 16000
+
+audio:
+  input_codec: mulaw
+  output_codec: mulaw
+  sample_rate: 8000
+
+logging:
+  level: INFO
