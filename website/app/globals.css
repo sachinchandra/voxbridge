@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-950 text-white antialiased;
+  }
+}
+
+@layer utilities {
+  .gradient-text {
+    @apply bg-gradient-to-r from-violet-400 via-purple-400 to-indigo-400 bg-clip-text text-transparent;
+  }
+
+  .gradient-border {
+    @apply border border-violet-500/20;
+  }
+
+  .glow {
+    box-shadow: 0 0 60px rgba(124, 58, 237, 0.15);
+  }
+
+  .code-block {
+    @apply bg-gray-900 rounded-lg border border-gray-800 p-4 font-mono text-sm overflow-x-auto;
+  }
+}
+
+/* Syntax highlighting for code blocks */
+.code-keyword { color: #c792ea; }
+.code-string { color: #c3e88d; }
+.code-comment { color: #546e7a; }
+.code-function { color: #82aaff; }
+.code-number { color: #f78c6c; }
+.code-decorator { color: #ffcb6b; }
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Hide scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(124, 58, 237, 0.3);
+  border-radius: 3px;
+}
