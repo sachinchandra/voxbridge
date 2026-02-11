@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard';
 import ApiKeys from './pages/ApiKeys';
 import Usage from './pages/Usage';
 import Billing from './pages/Billing';
+import QuickStart from './pages/QuickStart';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token, isLoading } = useAuth();
@@ -60,6 +61,7 @@ function App() {
             }
           >
             <Route index element={<Dashboard />} />
+            <Route path="quickstart" element={<QuickStart />} />
             <Route path="keys" element={<ApiKeys />} />
             <Route path="usage" element={<Usage />} />
             <Route path="billing" element={<Billing />} />
