@@ -41,6 +41,15 @@ class AudioConfig(BaseModel):
     sample_rate: int = 8000
 
 
+class SaaSConfig(BaseModel):
+    """SaaS platform configuration (optional)."""
+
+    api_key: str = ""
+    platform_url: str = "https://api.voxbridge.io"
+    validate_on_start: bool = True
+    report_usage: bool = True
+
+
 class LoggingConfig(BaseModel):
     """Logging configuration."""
 
@@ -76,6 +85,7 @@ class BridgeConfig(BaseModel):
     provider: ProviderConfig = Field(default_factory=ProviderConfig)
     bot: BotConfig = Field(default_factory=BotConfig)
     audio: AudioConfig = Field(default_factory=AudioConfig)
+    saas: SaaSConfig = Field(default_factory=SaaSConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
     @classmethod
@@ -116,6 +126,8 @@ class BridgeConfig(BaseModel):
             "bot_url": ("bot", "url"),
             "bot_codec": ("bot", "codec"),
             "bot_sample_rate": ("bot", "sample_rate"),
+            "api_key": ("saas", "api_key"),
+            "platform_url": ("saas", "platform_url"),
             "log_level": ("logging", "level"),
         }
 

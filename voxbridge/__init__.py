@@ -28,7 +28,8 @@ __version__ = "0.1.0"
 
 # Core
 from voxbridge.bridge import VoxBridge
-from voxbridge.config import BridgeConfig, load_config
+from voxbridge.config import BridgeConfig, SaaSConfig, load_config
+from voxbridge.platform import PlatformClient
 from voxbridge.session import CallSession, SessionStore
 
 # Events
@@ -67,6 +68,8 @@ __all__ = [
     # Core
     "VoxBridge",
     "BridgeConfig",
+    "SaaSConfig",
+    "PlatformClient",
     "load_config",
     "CallSession",
     "SessionStore",

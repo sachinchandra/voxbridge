@@ -34,6 +34,7 @@ from voxbridge.core.events import (
     HoldEnded,
     HoldStarted,
 )
+from voxbridge.platform import PlatformClient
 from voxbridge.serializers.base import BaseSerializer
 from voxbridge.serializers.registry import serializer_registry
 from voxbridge.session import CallSession, SessionStore
@@ -93,6 +94,16 @@ class VoxBridge:
 
         # Server instance
         self._server: WebSocketServer | None = None
+
+        # SaaS platform client (optional)
+        self._platform: PlatformClient | None = None
+        if self.config.saas.api_key:
+            self._platform = PlatformClient(
+                api_key=self.config.saas.api_key,
+                platform_url=self.config.saas.platform_url,
+                validate_on_start=self.config.saas.validate_on_start,
+                report_usage=self.config.saas.report_usage,
+            )
 
     # ------------------------------------------------------------------
     # Decorator API for event handlers
@@ -167,13 +178,25 @@ class VoxBridge:
 
     async def _run_async(self) -> None:
         """Internal async entry point."""
+        # Validate API key with platform if configured
+        if self._platform and self._platform.validate_on_start:
+            allowed = await self._platform.validate()
+            if not allowed:
+                logger.error("VoxBridge: API key rejected or usage limit exceeded. Exiting.")
+                await self._platform.close()
+                return
+
         self._server = WebSocketServer(
             host=self.config.provider.listen_host,
             port=self.config.provider.listen_port,
             path=self.config.provider.listen_path,
             handler=self._handle_provider_connection,
         )
-        await self._server.serve_forever()
+        try:
+            await self._server.serve_forever()
+        finally:
+            if self._platform:
+                await self._platform.close()
 
     # ------------------------------------------------------------------
     # Connection handling
@@ -241,6 +264,22 @@ class VoxBridge:
         finally:
             session.end()
             await bot_transport.disconnect()
+
+            # Report usage to platform
+            if self._platform and self._platform.report_usage:
+                try:
+                    await self._platform.report_call(
+                        session_id=session.session_id,
+                        call_id=session.call_id,
+                        provider=self.config.provider.type,
+                        duration_seconds=session.duration_ms / 1000.0,
+                        audio_bytes_in=session.audio_bytes_in,
+                        audio_bytes_out=session.audio_bytes_out,
+                        status="completed",
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to report usage: {e}")
+
             self.sessions.remove(session.session_id)
             logger.info(
                 f"Session ended: {session.session_id} "
@@ -303,6 +342,10 @@ class VoxBridge:
                             await bot.send(start_json)
 
                     elif isinstance(event, AudioFrame):
+                        # Track inbound audio bytes
+                        if event.data:
+                            session.audio_bytes_in += len(event.data)
+
                         # Run through on_audio handlers
                         frame = event
                         for handler in self._handlers["on_audio"]:
@@ -361,6 +404,9 @@ class VoxBridge:
                 raw = await bot.recv()
 
                 if isinstance(raw, bytes):
+                    # Track outbound audio bytes
+                    session.audio_bytes_out += len(raw)
+
                     # Binary audio from bot - convert and send to provider
                     converted = session.convert_outbound_audio(
                         raw, bot_codec, provider_codec

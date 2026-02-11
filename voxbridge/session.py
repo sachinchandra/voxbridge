@@ -65,6 +65,11 @@ class CallSession:
     started_at: float = field(default_factory=time.time)
     ended_at: float | None = None
 
+    # SaaS tracking
+    api_key_id: str = ""
+    audio_bytes_in: int = 0
+    audio_bytes_out: int = 0
+
     # Asyncio tasks for the bidirectional loops
     _tasks: list[asyncio.Task] = field(default_factory=list)
 
