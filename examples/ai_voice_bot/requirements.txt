@@ -1,0 +1,6 @@
+voxbridge-io
+websockets>=12.0
+aiohttp>=3.9
+openai>=1.0
+elevenlabs>=1.0
+flask>=3.0

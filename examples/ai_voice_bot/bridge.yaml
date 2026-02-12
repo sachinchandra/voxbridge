@@ -1,0 +1,18 @@
+# VoxBridge config — Twilio → AI Voice Bot
+# Run with: voxbridge run --config bridge.yaml
+
+provider:
+  type: twilio
+  listen_host: "0.0.0.0"
+  listen_port: 8765
+  listen_path: /
+
+bot:
+  url: ws://localhost:9000/ws
+  codec: mulaw
+  sample_rate: 8000
+
+audio:
+  input_codec: mulaw
+  output_codec: mulaw
+  sample_rate: 8000
