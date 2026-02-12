@@ -17,6 +17,7 @@ from voxbridge import VoxBridge, CallSession, AudioFrame
 bridge = VoxBridge({
     "provider": "twilio",
     "listen_port": 8765,
+    "listen_path": "/",
     "bot_url": "ws://localhost:9000/ws",
     "audio": {
         "input_codec": "mulaw",

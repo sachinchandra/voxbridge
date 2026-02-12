@@ -126,11 +126,13 @@ class WebSocketServer:
         port: int = 8765,
         path: str = "/",
         handler=None,
+        http_handler=None,
     ) -> None:
         self.host = host
         self.port = port
         self.path = path
         self._handler = handler
+        self._http_handler = http_handler
         self._server: Any = None
 
     async def _ws_handler(self, websocket) -> None:
@@ -151,6 +153,35 @@ class WebSocketServer:
         else:
             logger.warning("No handler registered for incoming connections")
 
+    async def _process_request(self, connection, request):
+        """Handle plain HTTP requests (non-WebSocket) on the same port.
+
+        If an ``http_handler`` was provided, non-upgrade HTTP requests
+        (e.g. POST /voice for TwiML) are served by it.  WebSocket
+        upgrade requests pass through untouched.
+        """
+        if self._http_handler is None:
+            return None  # Let websockets handle it normally
+
+        # Check if this is a WebSocket upgrade request
+        upgrade_header = None
+        for header_name, header_value in request.headers.raw_items():
+            if header_name.lower() == "upgrade":
+                upgrade_header = header_value.lower()
+                break
+
+        if upgrade_header == "websocket":
+            return None  # Let websockets handle the upgrade
+
+        # This is a plain HTTP request — delegate to the http_handler
+        try:
+            response = await self._http_handler(request)
+            return response
+        except Exception as e:
+            logger.error(f"HTTP handler error: {e}")
+            from websockets.http11 import Response
+            return Response(500, "Internal Server Error", websockets.Headers())
+
     async def start(self) -> None:
         """Start the WebSocket server."""
         logger.info(f"Starting WebSocket server on {self.host}:{self.port}{self.path}")
@@ -158,6 +189,7 @@ class WebSocketServer:
             self._ws_handler,
             self.host,
             self.port,
+            process_request=self._process_request if self._http_handler else None,
         )
         logger.info(f"WebSocket server listening on ws://{self.host}:{self.port}{self.path}")
 

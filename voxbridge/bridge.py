@@ -100,6 +100,9 @@ class VoxBridge:
         # Server instance
         self._server: WebSocketServer | None = None
 
+        # Optional HTTP handler for serving TwiML etc. on the same port
+        self._http_handler = None
+
         # SaaS platform client (optional)
         self._platform: PlatformClient | None = None
         if self.config.saas.api_key:
@@ -176,6 +179,18 @@ class VoxBridge:
         self._handlers["on_mark"].append(fn)
         return fn
 
+    def set_http_handler(self, handler) -> None:
+        """Set an HTTP handler for non-WebSocket requests on the same port.
+
+        This allows serving TwiML or other HTTP responses alongside the
+        WebSocket server, so you only need a single port (and a single
+        ngrok tunnel).
+
+        The handler receives a websockets Request object and should
+        return a websockets Response.
+        """
+        self._http_handler = handler
+
     def on_event(self, fn: EventHandler) -> EventHandler:
         """Register a catch-all handler for any event.
 
@@ -215,6 +230,7 @@ class VoxBridge:
             port=self.config.provider.listen_port,
             path=self.config.provider.listen_path,
             handler=self._handle_provider_connection,
+            http_handler=self._http_handler,
         )
         try:
             await self._server.serve_forever()
