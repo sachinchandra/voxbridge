@@ -27,8 +27,10 @@ from voxbridge.core.events import (
     AudioFrame,
     CallEnded,
     CallStarted,
+    ClearAudio,
     Codec,
     DTMFReceived,
+    Mark,
 )
 from voxbridge.serializers.base import BaseSerializer
 
@@ -79,13 +81,26 @@ class GenericWebSocketSerializer(BaseSerializer):
 
         if msg_type == "start":
             self._call_id = msg.get("call_id", str(uuid.uuid4()))
+            # Extract SIP headers if provided
+            sip_headers: dict[str, str] = {}
+            for key, val in msg.get("sip_headers", {}).items():
+                sip_headers[key] = str(val)
             return [
                 CallStarted(
                     call_id=self._call_id,
                     provider="generic",
                     from_number=msg.get("from", ""),
                     to_number=msg.get("to", ""),
+                    sip_headers=sip_headers,
                     metadata=msg.get("metadata", {}),
+                )
+            ]
+
+        if msg_type == "mark":
+            return [
+                Mark(
+                    call_id=self._call_id,
+                    name=msg.get("name", ""),
                 )
             ]
 
@@ -149,6 +164,19 @@ class GenericWebSocketSerializer(BaseSerializer):
                 "type": "dtmf",
                 "call_id": event.call_id,
                 "digit": event.digit,
+            })
+
+        if isinstance(event, ClearAudio):
+            return json.dumps({
+                "type": "clear",
+                "call_id": event.call_id,
+            })
+
+        if isinstance(event, Mark):
+            return json.dumps({
+                "type": "mark",
+                "call_id": event.call_id,
+                "name": event.name,
             })
 
         return None

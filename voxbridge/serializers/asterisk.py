@@ -16,11 +16,13 @@ from voxbridge.core.events import (
     AudioFrame,
     CallEnded,
     CallStarted,
+    ClearAudio,
     Codec,
     CustomEvent,
     DTMFReceived,
     HoldEnded,
     HoldStarted,
+    Mark,
 )
 from voxbridge.serializers.base import BaseSerializer
 
@@ -85,12 +87,20 @@ class AsteriskSerializer(BaseSerializer):
             self._channel_id = channel.get("id", "")
             caller = channel.get("caller", {})
             connected = channel.get("connected", {})
+            # Extract SIP headers from channel variables
+            dialplan = channel.get("dialplan", {})
+            chan_vars = channel.get("channelvars", {})
+            sip_headers: dict[str, str] = {}
+            for key, val in chan_vars.items():
+                if key.startswith("PJSIP_HEADER") or key.startswith("SIP_HEADER"):
+                    sip_headers[key] = str(val)
             return [
                 CallStarted(
                     call_id=self._channel_id,
                     from_number=caller.get("number", ""),
                     to_number=connected.get("number", ""),
                     provider=self.name,
+                    sip_headers=sip_headers,
                     metadata={
                         "channel_name": channel.get("name", ""),
                         "args": msg.get("args", []),
@@ -152,6 +162,21 @@ class AsteriskSerializer(BaseSerializer):
         """
         if isinstance(event, AudioFrame):
             return event.data
+
+        if isinstance(event, ClearAudio):
+            # Asterisk: stop playback on channel via ARI-style command
+            return json.dumps({
+                "type": "PlaybackControl",
+                "channel_id": event.call_id or self._channel_id,
+                "operation": "stop",
+            })
+
+        if isinstance(event, Mark):
+            return json.dumps({
+                "type": "Mark",
+                "channel_id": event.call_id or self._channel_id,
+                "name": event.name,
+            })
 
         return None
 

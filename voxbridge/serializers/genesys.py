@@ -18,11 +18,13 @@ from voxbridge.core.events import (
     AudioFrame,
     CallEnded,
     CallStarted,
+    ClearAudio,
     Codec,
     CustomEvent,
     DTMFReceived,
     HoldEnded,
     HoldStarted,
+    Mark,
 )
 from voxbridge.serializers.base import BaseSerializer
 
@@ -129,12 +131,20 @@ class GenesysSerializer(BaseSerializer):
 
         Supported outbound events:
             * :class:`AudioFrame` -- sent as raw binary mu-law bytes.
+            * :class:`ClearAudio` -- sent as a ``discardAudio`` control message.
+            * :class:`Mark` -- sent as a ``position`` tracking message.
 
         Returns ``None`` for event types that have no Genesys outbound mapping.
         """
         if isinstance(event, AudioFrame):
             # Genesys expects raw binary audio on the wire.
             return bytes(event.data)
+
+        if isinstance(event, ClearAudio):
+            return self.build_discard_audio_message()
+
+        if isinstance(event, Mark):
+            return self.build_position_message(event.name)
 
         return None
 
@@ -204,6 +214,34 @@ class GenesysSerializer(BaseSerializer):
             }
         )
 
+    def build_discard_audio_message(self) -> str:
+        """Build a JSON ``discardAudio`` control message for Genesys.
+
+        Instructs Genesys to discard any buffered audio that has not been
+        played yet.  Used for barge-in.
+        """
+        return json.dumps(
+            {
+                "type": "discardAudio",
+                "id": self.session_id,
+            }
+        )
+
+    def build_position_message(self, name: str) -> str:
+        """Build a JSON ``position`` control message for tracking playback.
+
+        Genesys uses position markers to track audio playback progress.
+        """
+        return json.dumps(
+            {
+                "type": "position",
+                "id": self.session_id,
+                "parameters": {
+                    "name": name,
+                },
+            }
+        )
+
     def build_disconnect(self, reason: str = "normal") -> str:
         """Build a JSON ``disconnect`` control message.
 
@@ -251,10 +289,17 @@ class GenesysSerializer(BaseSerializer):
         params = msg.get("parameters", {})
         self.conversation_id = params.get("conversationId", "")
 
+        # Extract SIP headers from participant data or custom parameters
+        participant = params.get("participant", {})
+        sip_headers: dict[str, str] = {}
+        for key, val in participant.items():
+            if key.startswith("sip_") or key.startswith("x-") or key.startswith("X-"):
+                sip_headers[key] = str(val)
+
         metadata: dict[str, Any] = {
             "session_id": self.session_id,
             "organization_id": params.get("organizationId", ""),
-            "participant": params.get("participant", {}),
+            "participant": participant,
             "position": msg.get("position", 0),
         }
 
@@ -262,6 +307,7 @@ class GenesysSerializer(BaseSerializer):
             CallStarted(
                 call_id=self.conversation_id,
                 provider="genesys",
+                sip_headers=sip_headers,
                 metadata=metadata,
             )
         ]

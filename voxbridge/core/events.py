@@ -29,6 +29,9 @@ class EventType(str, Enum):
     HOLD_STARTED = "hold_started"
     HOLD_ENDED = "hold_ended"
     TRANSFER_REQUESTED = "transfer_requested"
+    BARGE_IN = "barge_in"
+    CLEAR_AUDIO = "clear_audio"
+    MARK = "mark"
     CUSTOM = "custom"
     ERROR = "error"
 
@@ -62,6 +65,7 @@ class CallStarted(Event):
     to_number: str = ""
     provider: str = ""
     direction: str = "inbound"  # "inbound" or "outbound"
+    sip_headers: dict[str, str] = Field(default_factory=dict)  # Custom SIP headers
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -102,6 +106,41 @@ class TransferRequested(Event):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class BargeIn(Event):
+    """Fired when the caller interrupts bot playback (barge-in).
+
+    When detected, the bridge should:
+    1. Clear any queued outbound audio
+    2. Notify the bot to stop TTS/playback
+    3. Start forwarding the caller's speech to the bot
+    """
+
+    event_type: EventType = EventType.BARGE_IN
+    audio_energy: float = 0.0  # RMS energy of the interrupting audio
+
+
+class ClearAudio(Event):
+    """Control event: instruct the provider to flush queued outbound audio.
+
+    Sent from bot → provider when the bot wants to stop playback immediately
+    (e.g., on barge-in, or when switching to a new response).
+    """
+
+    event_type: EventType = EventType.CLEAR_AUDIO
+
+
+class Mark(Event):
+    """Marker event for tracking audio playback progress.
+
+    The bot sends a mark, it flows through the provider, and when the provider
+    plays it back (e.g., Twilio sends a 'mark' event), the bridge fires this
+    event back to the bot so it knows audio up to that point has been played.
+    """
+
+    event_type: EventType = EventType.MARK
+    name: str = ""  # Unique mark identifier
+
+
 class CustomEvent(Event):
     """Provider-specific events that don't map to standard events."""
 
@@ -128,6 +167,9 @@ AnyEvent = (
     | HoldStarted
     | HoldEnded
     | TransferRequested
+    | BargeIn
+    | ClearAudio
+    | Mark
     | CustomEvent
     | ErrorEvent
 )
@@ -141,6 +183,9 @@ EVENT_TYPE_MAP: dict[EventType, type[Event]] = {
     EventType.HOLD_STARTED: HoldStarted,
     EventType.HOLD_ENDED: HoldEnded,
     EventType.TRANSFER_REQUESTED: TransferRequested,
+    EventType.BARGE_IN: BargeIn,
+    EventType.CLEAR_AUDIO: ClearAudio,
+    EventType.MARK: Mark,
     EventType.CUSTOM: CustomEvent,
     EventType.ERROR: ErrorEvent,
 }

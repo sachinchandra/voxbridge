@@ -35,8 +35,10 @@ from voxbridge.session import CallSession, SessionStore
 # Events
 from voxbridge.core.events import (
     AudioFrame,
+    BargeIn,
     CallEnded,
     CallStarted,
+    ClearAudio,
     Codec,
     CustomEvent,
     DTMFReceived,
@@ -45,6 +47,7 @@ from voxbridge.core.events import (
     EventType,
     HoldEnded,
     HoldStarted,
+    Mark,
     TransferRequested,
 )
 
@@ -77,11 +80,14 @@ __all__ = [
     "Event",
     "EventType",
     "AudioFrame",
+    "BargeIn",
     "CallStarted",
     "CallEnded",
+    "ClearAudio",
     "DTMFReceived",
     "HoldStarted",
     "HoldEnded",
+    "Mark",
     "TransferRequested",
     "CustomEvent",
     "ErrorEvent",

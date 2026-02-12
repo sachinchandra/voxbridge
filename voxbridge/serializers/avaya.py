@@ -26,11 +26,13 @@ from voxbridge.core.events import (
     AudioFrame,
     CallEnded,
     CallStarted,
+    ClearAudio,
     Codec,
     CustomEvent,
     DTMFReceived,
     HoldEnded,
     HoldStarted,
+    Mark,
     TransferRequested,
 )
 from voxbridge.serializers.base import BaseSerializer
@@ -81,12 +83,18 @@ class AvayaSerializer(BaseSerializer):
             self._session_id = msg.get("sessionId", "")
             self._call_id = msg.get("callId", self._session_id)
             params = msg.get("parameters", {})
+            # Extract SIP headers from Avaya parameters
+            sip_headers: dict[str, str] = {}
+            for key, val in params.items():
+                if key.startswith("sip_") or key.startswith("x-") or key.startswith("X-"):
+                    sip_headers[key] = str(val)
             return [
                 CallStarted(
                     call_id=self._call_id,
                     provider="avaya",
                     from_number=params.get("callerNumber", ""),
                     to_number=params.get("calledNumber", ""),
+                    sip_headers=sip_headers,
                     metadata={
                         "session_id": self._session_id,
                         "ucid": params.get("ucid", ""),
@@ -144,6 +152,19 @@ class AvayaSerializer(BaseSerializer):
                 "type": "session.end",
                 "sessionId": self._session_id,
                 "reason": event.reason,
+            })
+
+        if isinstance(event, ClearAudio):
+            return json.dumps({
+                "type": "audio.clear",
+                "sessionId": self._session_id,
+            })
+
+        if isinstance(event, Mark):
+            return json.dumps({
+                "type": "audio.mark",
+                "sessionId": self._session_id,
+                "name": event.name,
             })
 
         if isinstance(event, TransferRequested):

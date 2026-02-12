@@ -19,8 +19,10 @@ from voxbridge.core.events import (
     AudioFrame,
     CallEnded,
     CallStarted,
+    ClearAudio,
     Codec,
     DTMFReceived,
+    Mark,
     CustomEvent,
 )
 from voxbridge.serializers.base import BaseSerializer
@@ -91,6 +93,9 @@ class TwilioSerializer(BaseSerializer):
         if event_type == "dtmf":
             return self._handle_dtmf(msg)
 
+        if event_type == "mark":
+            return self._handle_mark(msg)
+
         if event_type == "stop":
             return self._handle_stop(msg)
 
@@ -128,6 +133,12 @@ class TwilioSerializer(BaseSerializer):
                 }
             )
 
+        if isinstance(event, ClearAudio):
+            return self.build_clear_message()
+
+        if isinstance(event, Mark):
+            return self.build_mark_message(event.name)
+
         # No mapping for other event types on the outbound side.
         return None
 
@@ -147,12 +158,27 @@ class TwilioSerializer(BaseSerializer):
         """Build a Twilio ``clear`` control message.
 
         Sending this message instructs Twilio to discard any buffered audio
-        that has not yet been played to the caller.
+        that has not yet been played to the caller.  Used for barge-in.
         """
         return json.dumps(
             {
                 "event": "clear",
                 "streamSid": self.stream_sid,
+            }
+        )
+
+    def build_mark_message(self, name: str) -> str:
+        """Build a Twilio ``mark`` control message.
+
+        Marks are named checkpoints in the audio stream.  When all audio
+        before the mark has been played, Twilio fires a ``mark`` event
+        back so the bot knows playback reached that point.
+        """
+        return json.dumps(
+            {
+                "event": "mark",
+                "streamSid": self.stream_sid,
+                "mark": {"name": name},
             }
         )
 
@@ -175,10 +201,20 @@ class TwilioSerializer(BaseSerializer):
         self.stream_sid = start_data.get("streamSid", "")
         self.call_sid = start_data.get("callSid", "")
 
+        # Extract custom parameters (which can carry SIP headers)
+        custom_params = start_data.get("customParameters", {})
+
+        # Extract SIP headers: Twilio passes custom SIP headers via
+        # customParameters when configured in TwiML with <Parameter>
+        sip_headers: dict[str, str] = {}
+        for key, val in custom_params.items():
+            if key.startswith("sip_") or key.startswith("x-") or key.startswith("X-"):
+                sip_headers[key] = str(val)
+
         metadata: dict[str, Any] = {
             "account_sid": start_data.get("accountSid", ""),
             "stream_sid": self.stream_sid,
-            "custom_parameters": start_data.get("customParameters", {}),
+            "custom_parameters": custom_params,
             "media_format": start_data.get("mediaFormat", {}),
         }
 
@@ -186,6 +222,7 @@ class TwilioSerializer(BaseSerializer):
             CallStarted(
                 call_id=self.call_sid,
                 provider="twilio",
+                sip_headers=sip_headers,
                 metadata=metadata,
             )
         ]
@@ -222,6 +259,21 @@ class TwilioSerializer(BaseSerializer):
             DTMFReceived(
                 call_id=self.call_sid,
                 digit=digit,
+            )
+        ]
+
+    def _handle_mark(self, msg: dict) -> list[AnyEvent]:
+        """Process a Twilio ``mark`` event (playback reached this checkpoint)."""
+        mark_data = msg.get("mark", {})
+        mark_name = mark_data.get("name", "")
+
+        if "streamSid" in msg:
+            self.stream_sid = msg["streamSid"]
+
+        return [
+            Mark(
+                call_id=self.call_sid,
+                name=mark_name,
             )
         ]
 

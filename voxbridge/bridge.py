@@ -26,13 +26,16 @@ from voxbridge.config import BridgeConfig, load_config
 from voxbridge.core.events import (
     AnyEvent,
     AudioFrame,
+    BargeIn,
     CallEnded,
     CallStarted,
+    ClearAudio,
     Codec,
     DTMFReceived,
     EventType,
     HoldEnded,
     HoldStarted,
+    Mark,
 )
 from voxbridge.platform import PlatformClient
 from voxbridge.serializers.base import BaseSerializer
@@ -89,6 +92,8 @@ class VoxBridge:
             "on_dtmf": [],
             "on_hold_start": [],
             "on_hold_end": [],
+            "on_barge_in": [],
+            "on_mark": [],
             "on_event": [],  # catch-all
         }
 
@@ -150,6 +155,25 @@ class VoxBridge:
     def on_hold_end(self, fn: EventHandler) -> EventHandler:
         """Register a handler for hold end events."""
         self._handlers["on_hold_end"].append(fn)
+        return fn
+
+    def on_barge_in(self, fn: EventHandler) -> EventHandler:
+        """Register a handler for barge-in events.
+
+        Fired when the caller speaks while the bot is playing audio.
+        The handler receives (session: CallSession).
+        The bridge automatically clears queued audio on barge-in.
+        """
+        self._handlers["on_barge_in"].append(fn)
+        return fn
+
+    def on_mark(self, fn: EventHandler) -> EventHandler:
+        """Register a handler for audio playback mark events.
+
+        Fired when the provider confirms audio up to a mark has played.
+        The handler receives (session: CallSession, mark_name: str).
+        """
+        self._handlers["on_mark"].append(fn)
         return fn
 
     def on_event(self, fn: EventHandler) -> EventHandler:
@@ -327,24 +351,53 @@ class VoxBridge:
                         session.from_number = event.from_number
                         session.to_number = event.to_number
 
-                        # Forward call start to bot
-                        bot_msg = await serializer.serialize(event)
-                        if bot_msg:
-                            # Re-serialize as generic for the bot
-                            start_json = json.dumps({
-                                "type": "start",
-                                "call_id": event.call_id,
-                                "from": event.from_number,
-                                "to": event.to_number,
-                                "provider": event.provider,
-                                "metadata": event.metadata,
-                            })
-                            await bot.send(start_json)
+                        # Store SIP headers from the provider
+                        if event.sip_headers:
+                            session.sip_headers = event.sip_headers
+
+                        # Forward call start to bot (including SIP headers)
+                        start_json = json.dumps({
+                            "type": "start",
+                            "call_id": event.call_id,
+                            "from": event.from_number,
+                            "to": event.to_number,
+                            "provider": event.provider,
+                            "sip_headers": event.sip_headers,
+                            "metadata": event.metadata,
+                        })
+                        await bot.send(start_json)
 
                     elif isinstance(event, AudioFrame):
                         # Track inbound audio bytes
                         if event.data:
                             session.audio_bytes_in += len(event.data)
+
+                        # Barge-in detection: caller audio while bot is speaking
+                        if session.is_bot_speaking and session.barge_in_enabled:
+                            if event.data and len(event.data) > 0:
+                                logger.info(
+                                    f"Barge-in detected on session {session.session_id}"
+                                )
+                                # Clear outbound audio queue
+                                cleared = session.clear_outbound_audio()
+                                logger.debug(f"Cleared {cleared} audio chunks from queue")
+
+                                # Send clear to provider (flush buffered TTS)
+                                clear_event = ClearAudio(call_id=session.call_id)
+                                clear_msg = await serializer.serialize(clear_event)
+                                if clear_msg:
+                                    await provider.send(clear_msg)
+
+                                # Notify bot about barge-in
+                                barge_json = json.dumps({
+                                    "type": "barge_in",
+                                    "call_id": session.call_id,
+                                })
+                                await bot.send(barge_json)
+
+                                # Dispatch barge-in event to handlers
+                                barge_event = BargeIn(call_id=session.call_id)
+                                await self._dispatch_event(session, barge_event)
 
                         # Run through on_audio handlers
                         frame = event
@@ -381,6 +434,23 @@ class VoxBridge:
                         })
                         await bot.send(dtmf_json)
 
+                    elif isinstance(event, Mark):
+                        # Provider confirmed playback reached this mark
+                        # Remove from pending marks
+                        if event.name in session._pending_marks:
+                            session._pending_marks.remove(event.name)
+                        # If no more pending marks, bot is done speaking
+                        if not session._pending_marks:
+                            session.is_bot_speaking = False
+
+                        # Notify bot that playback reached this mark
+                        mark_json = json.dumps({
+                            "type": "mark",
+                            "call_id": session.call_id,
+                            "name": event.name,
+                        })
+                        await bot.send(mark_json)
+
         except Exception as e:
             if session.is_active:
                 logger.error(f"Provider-to-bot loop error: {e}")
@@ -406,6 +476,9 @@ class VoxBridge:
                 if isinstance(raw, bytes):
                     # Track outbound audio bytes
                     session.audio_bytes_out += len(raw)
+
+                    # Mark bot as speaking when sending audio
+                    session.is_bot_speaking = True
 
                     # Binary audio from bot - convert and send to provider
                     converted = session.convert_outbound_audio(
@@ -440,6 +513,38 @@ class VoxBridge:
                                     else json.dumps(wire_msg)
                                 )
                             return
+
+                        elif msg_type == "clear":
+                            # Bot requests clearing queued audio
+                            logger.debug(
+                                f"Bot requested audio clear for session "
+                                f"{session.session_id}"
+                            )
+                            session.clear_outbound_audio()
+                            clear_event = ClearAudio(call_id=session.call_id)
+                            clear_msg = await serializer.serialize(clear_event)
+                            if clear_msg:
+                                await provider.send(clear_msg)
+
+                        elif msg_type == "mark":
+                            # Bot sends a playback mark
+                            mark_name = msg.get("name", "")
+                            if mark_name:
+                                session._pending_marks.append(mark_name)
+                                mark_event = Mark(
+                                    call_id=session.call_id,
+                                    name=mark_name,
+                                )
+                                mark_msg = await serializer.serialize(mark_event)
+                                if mark_msg:
+                                    await provider.send(mark_msg)
+
+                        elif msg_type == "end_of_speech":
+                            # Bot signals it finished sending TTS audio
+                            # (if no marks pending, update speaking state)
+                            if not session._pending_marks:
+                                session.is_bot_speaking = False
+
                     except json.JSONDecodeError:
                         logger.warning(f"Invalid JSON from bot: {raw[:100]}")
 
@@ -497,3 +602,17 @@ class VoxBridge:
                     await handler(session)
                 except Exception as e:
                     logger.error(f"on_hold_end handler error: {e}")
+
+        elif isinstance(event, BargeIn):
+            for handler in self._handlers["on_barge_in"]:
+                try:
+                    await handler(session)
+                except Exception as e:
+                    logger.error(f"on_barge_in handler error: {e}")
+
+        elif isinstance(event, Mark):
+            for handler in self._handlers["on_mark"]:
+                try:
+                    await handler(session, event.name)
+                except Exception as e:
+                    logger.error(f"on_mark handler error: {e}")

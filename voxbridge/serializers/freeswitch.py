@@ -15,9 +15,11 @@ from voxbridge.core.events import (
     AudioFrame,
     CallEnded,
     CallStarted,
+    ClearAudio,
     Codec,
     CustomEvent,
     DTMFReceived,
+    Mark,
 )
 from voxbridge.serializers.base import BaseSerializer
 
@@ -74,12 +76,18 @@ class FreeSwitchSerializer(BaseSerializer):
 
         if event_name == "connect":
             self._uuid = msg.get("uuid", "")
+            # Extract SIP headers from FreeSWITCH variables
+            sip_headers: dict[str, str] = {}
+            for key, val in msg.items():
+                if key.startswith("variable_sip_h_") or key.startswith("sip_"):
+                    sip_headers[key] = str(val)
             return [
                 CallStarted(
                     call_id=self._uuid,
                     from_number=msg.get("caller_id", ""),
                     to_number=msg.get("destination", ""),
                     provider=self.name,
+                    sip_headers=sip_headers,
                     metadata={
                         "sip_from_user": msg.get("variable_sip_from_user", ""),
                     },
@@ -127,6 +135,20 @@ class FreeSwitchSerializer(BaseSerializer):
                 "command": "hangup",
                 "uuid": event.call_id or self._uuid,
                 "cause": event.reason or "NORMAL_CLEARING",
+            })
+
+        if isinstance(event, ClearAudio):
+            # FreeSWITCH: break command stops current playback
+            return json.dumps({
+                "command": "break",
+                "uuid": event.call_id or self._uuid,
+            })
+
+        if isinstance(event, Mark):
+            return json.dumps({
+                "command": "mark",
+                "uuid": event.call_id or self._uuid,
+                "name": event.name,
             })
 
         from voxbridge.core.events import TransferRequested

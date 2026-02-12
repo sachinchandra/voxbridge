@@ -24,11 +24,13 @@ from voxbridge.core.events import (
     AudioFrame,
     CallEnded,
     CallStarted,
+    ClearAudio,
     Codec,
     CustomEvent,
     DTMFReceived,
     HoldEnded,
     HoldStarted,
+    Mark,
 )
 from voxbridge.serializers.base import BaseSerializer
 
@@ -76,12 +78,18 @@ class CiscoSerializer(BaseSerializer):
             self._interaction_id = msg.get("interactionId", "")
             self._agent_id = msg.get("agentId", "")
             data = msg.get("data", {})
+            # Extract SIP headers from call data
+            sip_headers: dict[str, str] = {}
+            for key, val in data.items():
+                if key.startswith("sip_") or key.startswith("x-") or key.startswith("X-"):
+                    sip_headers[key] = str(val)
             return [
                 CallStarted(
                     call_id=self._interaction_id,
                     provider="cisco",
                     from_number=data.get("ani", ""),
                     to_number=data.get("dnis", ""),
+                    sip_headers=sip_headers,
                     metadata={
                         "interaction_id": self._interaction_id,
                         "agent_id": self._agent_id,
@@ -129,6 +137,19 @@ class CiscoSerializer(BaseSerializer):
                 "event": "call.end",
                 "interactionId": self._interaction_id,
                 "reason": event.reason,
+            })
+
+        if isinstance(event, ClearAudio):
+            return json.dumps({
+                "event": "audio.clear",
+                "interactionId": self._interaction_id,
+            })
+
+        if isinstance(event, Mark):
+            return json.dumps({
+                "event": "audio.mark",
+                "interactionId": self._interaction_id,
+                "name": event.name,
             })
 
         return None

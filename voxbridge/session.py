@@ -65,6 +65,15 @@ class CallSession:
     started_at: float = field(default_factory=time.time)
     ended_at: float | None = None
 
+    # Barge-in / interruption state
+    is_bot_speaking: bool = False
+    barge_in_enabled: bool = True
+    _outbound_audio_queue: asyncio.Queue | None = None
+    _pending_marks: list[str] = field(default_factory=list)
+
+    # Custom SIP headers (passed from provider → bot)
+    sip_headers: dict[str, str] = field(default_factory=dict)
+
     # SaaS tracking
     api_key_id: str = ""
     audio_bytes_in: int = 0
@@ -72,6 +81,26 @@ class CallSession:
 
     # Asyncio tasks for the bidirectional loops
     _tasks: list[asyncio.Task] = field(default_factory=list)
+
+    @property
+    def outbound_audio_queue(self) -> asyncio.Queue:
+        """Lazy-init the outbound audio queue."""
+        if self._outbound_audio_queue is None:
+            self._outbound_audio_queue = asyncio.Queue(maxsize=500)
+        return self._outbound_audio_queue
+
+    def clear_outbound_audio(self) -> int:
+        """Flush all queued outbound audio. Returns number of chunks cleared."""
+        cleared = 0
+        if self._outbound_audio_queue:
+            while not self._outbound_audio_queue.empty():
+                try:
+                    self._outbound_audio_queue.get_nowait()
+                    cleared += 1
+                except asyncio.QueueEmpty:
+                    break
+        self.is_bot_speaking = False
+        return cleared
 
     def setup_resamplers(
         self,

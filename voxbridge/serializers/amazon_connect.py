@@ -25,11 +25,13 @@ from voxbridge.core.events import (
     AudioFrame,
     CallEnded,
     CallStarted,
+    ClearAudio,
     Codec,
     CustomEvent,
     DTMFReceived,
     HoldEnded,
     HoldStarted,
+    Mark,
 )
 from voxbridge.serializers.base import BaseSerializer
 
@@ -81,12 +83,18 @@ class AmazonConnectSerializer(BaseSerializer):
             self._contact_id = msg.get("contactId", "")
             self._instance_id = msg.get("instanceId", "")
             attributes = msg.get("contactAttributes", {})
+            # Extract SIP headers from contact attributes
+            sip_headers: dict[str, str] = {}
+            for key, val in attributes.items():
+                if key.startswith("sip_") or key.startswith("x-") or key.startswith("X-"):
+                    sip_headers[key] = str(val)
             return [
                 CallStarted(
                     call_id=self._contact_id,
                     provider="amazon_connect",
                     from_number=attributes.get("customerNumber", ""),
                     to_number=attributes.get("systemNumber", ""),
+                    sip_headers=sip_headers,
                     metadata={
                         "contact_id": self._contact_id,
                         "instance_id": self._instance_id,
@@ -135,6 +143,19 @@ class AmazonConnectSerializer(BaseSerializer):
                 "event": "END",
                 "contactId": self._contact_id,
                 "reason": event.reason,
+            })
+
+        if isinstance(event, ClearAudio):
+            return json.dumps({
+                "event": "CLEAR_AUDIO",
+                "contactId": self._contact_id,
+            })
+
+        if isinstance(event, Mark):
+            return json.dumps({
+                "event": "MARK",
+                "contactId": self._contact_id,
+                "name": event.name,
             })
 
         return None
