@@ -7,6 +7,7 @@ codec pipeline, and metadata. The SessionStore manages all active sessions.
 from __future__ import annotations
 
 import asyncio
+import struct
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -19,6 +20,120 @@ from voxbridge.audio.resampler import Resampler
 from voxbridge.core.events import Codec
 from voxbridge.serializers.base import BaseSerializer
 from voxbridge.transports.base import BaseTransport
+
+
+# ---------------------------------------------------------------------------
+# Audio energy helpers for barge-in VAD
+# ---------------------------------------------------------------------------
+
+# mu-law decode table (for fast RMS without full codec decode)
+_MULAW_DECODE_TABLE: list[int] = []
+for _i in range(256):
+    _v = ~_i & 0xFF
+    _sign = _v & 0x80
+    _exp = (_v >> 4) & 0x07
+    _mant = _v & 0x0F
+    _t = (_mant << 3) + 0x84
+    _t <<= _exp
+    _sample = _t - 0x84
+    if _sign:
+        _sample = -_sample
+    _MULAW_DECODE_TABLE.append(_sample)
+
+
+def compute_audio_energy(data: bytes, codec: str = "mulaw") -> float:
+    """Compute RMS energy of an audio frame.
+
+    Args:
+        data: Raw audio bytes.
+        codec: "mulaw", "alaw", or "pcm16".
+
+    Returns:
+        RMS energy as a float (0.0 = silence, ~32768.0 = max).
+    """
+    if not data:
+        return 0.0
+
+    if codec == "mulaw":
+        # Fast path: use lookup table directly
+        total = 0
+        for b in data:
+            s = _MULAW_DECODE_TABLE[b]
+            total += s * s
+        rms = (total / len(data)) ** 0.5
+        return rms
+    elif codec == "pcm16":
+        n_samples = len(data) // 2
+        if n_samples == 0:
+            return 0.0
+        samples = struct.unpack(f"<{n_samples}h", data)
+        total = sum(s * s for s in samples)
+        return (total / n_samples) ** 0.5
+    else:
+        # For alaw or unknown, fall back to treating as pcm16
+        n_samples = len(data) // 2
+        if n_samples == 0:
+            return 0.0
+        samples = struct.unpack(f"<{n_samples}h", data)
+        total = sum(s * s for s in samples)
+        return (total / n_samples) ** 0.5
+
+
+@dataclass
+class BargeInDetector:
+    """Energy-based Voice Activity Detector for barge-in detection.
+
+    Prevents false barge-in triggers from silence/background noise by
+    requiring the caller's audio energy to exceed a threshold for a
+    minimum number of consecutive frames before signalling barge-in.
+
+    Attributes:
+        energy_threshold: RMS energy threshold to consider "speech" (0-32768).
+            Default 200 works well for typical telephony. Lower = more sensitive.
+        min_speech_frames: Number of consecutive above-threshold frames
+            required before triggering barge-in. Default 3 (~60ms at 20ms/frame).
+            Higher = less sensitive / fewer false positives.
+        codec: Audio codec of incoming frames ("mulaw", "pcm16", "alaw").
+    """
+
+    energy_threshold: float = 200.0
+    min_speech_frames: int = 3
+    codec: str = "mulaw"
+    _consecutive_speech_frames: int = 0
+    _triggered: bool = False
+
+    def check(self, audio_data: bytes) -> bool:
+        """Check an audio frame for speech. Returns True if barge-in detected.
+
+        The detector requires `min_speech_frames` consecutive frames above
+        the energy threshold before returning True. After triggering, it
+        returns False until reset() is called.
+        """
+        if self._triggered:
+            return False
+
+        energy = compute_audio_energy(audio_data, self.codec)
+
+        if energy >= self.energy_threshold:
+            self._consecutive_speech_frames += 1
+            if self._consecutive_speech_frames >= self.min_speech_frames:
+                self._triggered = True
+                logger.debug(
+                    f"Barge-in VAD triggered: energy={energy:.0f} "
+                    f"(threshold={self.energy_threshold}), "
+                    f"frames={self._consecutive_speech_frames}"
+                )
+                return True
+        else:
+            # Reset counter on silence frame
+            self._consecutive_speech_frames = 0
+
+        return False
+
+    def reset(self) -> None:
+        """Reset the detector for a new speaking turn."""
+        self._consecutive_speech_frames = 0
+        self._triggered = False
 
 
 @dataclass
@@ -70,6 +185,9 @@ class CallSession:
     barge_in_enabled: bool = True
     _outbound_audio_queue: asyncio.Queue | None = None
     _pending_marks: list[str] = field(default_factory=list)
+
+    # Barge-in VAD
+    barge_in_detector: BargeInDetector = field(default_factory=BargeInDetector)
 
     # Custom SIP headers (passed from provider → bot)
     sip_headers: dict[str, str] = field(default_factory=dict)

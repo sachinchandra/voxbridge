@@ -30,7 +30,7 @@ __version__ = "0.1.0"
 from voxbridge.bridge import VoxBridge
 from voxbridge.config import BridgeConfig, SaaSConfig, load_config
 from voxbridge.platform import PlatformClient
-from voxbridge.session import CallSession, SessionStore
+from voxbridge.session import BargeInDetector, CallSession, SessionStore, compute_audio_energy
 
 # Events
 from voxbridge.core.events import (
@@ -76,6 +76,8 @@ __all__ = [
     "load_config",
     "CallSession",
     "SessionStore",
+    "BargeInDetector",
+    "compute_audio_energy",
     # Events
     "Event",
     "EventType",

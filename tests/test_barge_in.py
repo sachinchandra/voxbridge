@@ -1,7 +1,8 @@
-"""Tests for barge-in, marks, clear audio, and SIP headers."""
+"""Tests for barge-in, marks, clear audio, SIP headers, and VAD."""
 
 import asyncio
 import json
+import struct
 
 import pytest
 
@@ -16,7 +17,7 @@ from voxbridge.core.events import (
     Mark,
     EVENT_TYPE_MAP,
 )
-from voxbridge.session import CallSession
+from voxbridge.session import BargeInDetector, CallSession, compute_audio_energy
 from voxbridge.serializers.twilio import TwilioSerializer
 from voxbridge.serializers.genesys import GenesysSerializer
 from voxbridge.serializers.generic_ws import GenericWebSocketSerializer
@@ -117,6 +118,119 @@ class TestSIPHeaders:
 
 
 # ==========================================================================
+# Audio Energy / VAD Tests
+# ==========================================================================
+
+
+class TestComputeAudioEnergy:
+
+    def test_empty_data(self):
+        assert compute_audio_energy(b"", "mulaw") == 0.0
+
+    def test_mulaw_silence(self):
+        """mu-law silence is 0xFF (or 0x7F). Energy should be very low."""
+        # 0xFF decodes to ~0 in mu-law
+        silence = bytes([0xFF] * 160)  # 20ms of silence at 8kHz
+        energy = compute_audio_energy(silence, "mulaw")
+        assert energy < 50  # Very low energy
+
+    def test_mulaw_loud_audio(self):
+        """Loud mu-law audio should have high energy."""
+        # 0x00 decodes to a very large sample in mu-law (~-8031)
+        loud = bytes([0x00] * 160)
+        energy = compute_audio_energy(loud, "mulaw")
+        assert energy > 5000  # High energy
+
+    def test_pcm16_silence(self):
+        """PCM16 silence (all zeros) should be zero energy."""
+        silence = b"\x00\x00" * 160
+        energy = compute_audio_energy(silence, "pcm16")
+        assert energy == 0.0
+
+    def test_pcm16_loud(self):
+        """PCM16 loud signal should have high energy."""
+        # Pack 160 samples of value 10000
+        loud = struct.pack(f"<{160}h", *([10000] * 160))
+        energy = compute_audio_energy(loud, "pcm16")
+        assert abs(energy - 10000.0) < 1.0  # RMS of constant = constant
+
+
+class TestBargeInDetector:
+
+    def test_defaults(self):
+        detector = BargeInDetector()
+        assert detector.energy_threshold == 200.0
+        assert detector.min_speech_frames == 3
+        assert detector.codec == "mulaw"
+        assert detector._consecutive_speech_frames == 0
+        assert detector._triggered is False
+
+    def test_silence_does_not_trigger(self):
+        """mu-law silence should never trigger barge-in."""
+        detector = BargeInDetector()
+        silence = bytes([0xFF] * 160)
+        for _ in range(100):
+            assert detector.check(silence) is False
+
+    def test_speech_triggers_after_min_frames(self):
+        """Loud audio should trigger after min_speech_frames consecutive frames."""
+        detector = BargeInDetector(min_speech_frames=3)
+        loud = bytes([0x00] * 160)  # Very loud mu-law
+
+        assert detector.check(loud) is False  # frame 1
+        assert detector.check(loud) is False  # frame 2
+        assert detector.check(loud) is True   # frame 3 — trigger!
+
+    def test_speech_interrupted_by_silence_resets(self):
+        """A silence frame in between resets the counter."""
+        detector = BargeInDetector(min_speech_frames=3)
+        loud = bytes([0x00] * 160)
+        silence = bytes([0xFF] * 160)
+
+        detector.check(loud)   # 1
+        detector.check(loud)   # 2
+        detector.check(silence)  # reset!
+        detector.check(loud)   # 1 again
+        detector.check(loud)   # 2 again
+        assert detector._triggered is False  # still not triggered
+
+    def test_trigger_only_fires_once(self):
+        """After triggering, check() returns False until reset."""
+        detector = BargeInDetector(min_speech_frames=1)
+        loud = bytes([0x00] * 160)
+
+        assert detector.check(loud) is True   # trigger
+        assert detector.check(loud) is False  # already triggered
+
+    def test_reset(self):
+        """reset() allows the detector to trigger again."""
+        detector = BargeInDetector(min_speech_frames=1)
+        loud = bytes([0x00] * 160)
+
+        assert detector.check(loud) is True  # trigger
+        detector.reset()
+        assert detector.check(loud) is True  # trigger again
+
+    def test_custom_threshold(self):
+        """A high threshold should make the detector less sensitive."""
+        # Use a threshold so high that even loud audio won't trigger
+        detector = BargeInDetector(energy_threshold=50000.0, min_speech_frames=1)
+        loud = bytes([0x00] * 160)
+        assert detector.check(loud) is False
+
+    def test_low_threshold_catches_quiet_audio(self):
+        """A very low threshold catches even quiet audio."""
+        detector = BargeInDetector(energy_threshold=1.0, min_speech_frames=1)
+        # Some non-silent but quiet mulaw audio
+        quiet = bytes([0xFE] * 160)
+        energy = compute_audio_energy(quiet, "mulaw")
+        if energy >= 1.0:
+            assert detector.check(quiet) is True
+        else:
+            assert detector.check(quiet) is False
+
+
+# ==========================================================================
 # Session Barge-In State Tests
 # ==========================================================================
 
@@ -129,6 +243,11 @@ class TestSessionBargeIn:
         assert session.barge_in_enabled is True
         assert session.sip_headers == {}
         assert session._pending_marks == []
+
+    def test_session_has_barge_in_detector(self):
+        session = CallSession()
+        assert isinstance(session.barge_in_detector, BargeInDetector)
+        assert session.barge_in_detector.energy_threshold == 200.0
 
     def test_clear_outbound_audio_empty(self):
         session = CallSession()
@@ -637,3 +756,11 @@ class TestExports:
     def test_mark_exported(self):
         from voxbridge import Mark
         assert Mark is not None
+
+    def test_barge_in_detector_exported(self):
+        from voxbridge import BargeInDetector
+        assert BargeInDetector is not None
+
+    def test_compute_audio_energy_exported(self):
+        from voxbridge import compute_audio_energy
+        assert compute_audio_energy is not None

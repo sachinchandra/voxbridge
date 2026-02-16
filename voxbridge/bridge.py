@@ -265,6 +265,9 @@ class VoxBridge:
         bot_rate = self.config.bot.sample_rate
         session.setup_resamplers(provider_rate, bot_rate)
 
+        # Configure barge-in VAD with the provider's codec
+        session.barge_in_detector.codec = self.config.audio.input_codec
+
         # Connect to the voice bot
         bot_transport = WebSocketClientTransport(url=self.config.bot.url)
         try:
@@ -388,9 +391,10 @@ class VoxBridge:
                         if event.data:
                             session.audio_bytes_in += len(event.data)
 
-                        # Barge-in detection: caller audio while bot is speaking
+                        # Barge-in detection: caller speech while bot is speaking
+                        # Uses energy-based VAD to avoid false triggers on silence
                         if session.is_bot_speaking and session.barge_in_enabled:
-                            if event.data and len(event.data) > 0:
+                            if event.data and session.barge_in_detector.check(event.data):
                                 logger.info(
                                     f"Barge-in detected on session {session.session_id}"
                                 )
@@ -494,7 +498,10 @@ class VoxBridge:
                     session.audio_bytes_out += len(raw)
 
                     # Mark bot as speaking when sending audio
-                    session.is_bot_speaking = True
+                    if not session.is_bot_speaking:
+                        session.is_bot_speaking = True
+                        # Reset VAD for this new speaking turn
+                        session.barge_in_detector.reset()
 
                     # Binary audio from bot - convert and send to provider
                     converted = session.convert_outbound_audio(
