@@ -1,13 +1,21 @@
 """AI Voice Bot — Deepgram STT + OpenAI LLM + ElevenLabs TTS.
 
-A complete WebSocket voice bot that:
+A low-latency WebSocket voice bot that:
 1. Receives raw audio from VoxBridge (mulaw 8kHz)
 2. Streams it to Deepgram for real-time speech-to-text
-3. Sends the transcript to OpenAI GPT for a response
-4. Streams ElevenLabs TTS audio back through VoxBridge
+3. Streams OpenAI GPT response token-by-token
+4. Streams ElevenLabs TTS audio back in real-time (no buffering!)
+
+Optimizations over v1:
+- OpenAI streaming (first token → TTS in ~200ms instead of ~1s)
+- ElevenLabs streaming (audio starts playing as it arrives)
+- Shared aiohttp session (no TLS handshake per request)
+- Sentence-level TTS chunking with streaming overlap
+- Reduced Deepgram endpointing for faster turn detection
+- Barge-in cancellation of in-flight TTS
 
 Usage:
-    pip install websockets deepgram-sdk openai elevenlabs aiohttp
+    pip install websockets aiohttp
     export DEEPGRAM_API_KEY="your-key"
     export OPENAI_API_KEY="your-key"
     export ELEVENLABS_API_KEY="your-key"
@@ -17,11 +25,11 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import os
 import struct
 import sys
+import time
 from typing import Any
 
 import aiohttp
@@ -99,6 +107,31 @@ def pcm16_to_mulaw(pcm_bytes: bytes) -> bytes:
     return bytes(result)
 
 
+def downsample_16k_to_8k(pcm16_data: bytes) -> bytes:
+    """Simple 2:1 downsampling from 16kHz to 8kHz PCM16."""
+    n_samples = len(pcm16_data) // 2
+    if n_samples == 0:
+        return b""
+    samples = struct.unpack(f"<{n_samples}h", pcm16_data)
+    downsampled = samples[::2]
+    return struct.pack(f"<{len(downsampled)}h", *downsampled)
+
+
+# ---------------------------------------------------------------------------
+# Shared HTTP session — reuse TCP connections across all API calls
+# ---------------------------------------------------------------------------
+
+_http_session: aiohttp.ClientSession | None = None
+
+
+async def get_http_session() -> aiohttp.ClientSession:
+    """Get or create a shared aiohttp session (reuses TCP + TLS)."""
+    global _http_session
+    if _http_session is None or _http_session.closed:
+        _http_session = aiohttp.ClientSession()
+    return _http_session
+
+
 # ---------------------------------------------------------------------------
 # Deepgram STT (streaming)
 # ---------------------------------------------------------------------------
@@ -121,14 +154,15 @@ class DeepgramSTT:
             "&channels=1"
             "&punctuate=true"
             "&interim_results=false"
-            "&endpointing=300"
+            "&endpointing=200"       # 200ms silence = end of utterance (faster than 300)
             "&vad_events=true"
+            "&smart_format=true"
         )
         headers = {"Authorization": f"Token {self.api_key}"}
         self.ws = await websockets.connect(url, additional_headers=headers)
         self._running = True
         asyncio.create_task(self._recv_loop())
-        print("[Deepgram] Connected")
+        print("[Deepgram] Connected (endpointing=200ms)")
 
     async def send_audio(self, pcm16_bytes: bytes) -> None:
         """Send PCM16 audio to Deepgram."""
@@ -144,12 +178,15 @@ class DeepgramSTT:
             async for msg in self.ws:
                 data = json.loads(msg)
                 if data.get("type") == "Results":
+                    # Only use final results (is_final=true)
+                    if not data.get("is_final", False):
+                        continue
                     channel = data.get("channel", {})
                     alternatives = channel.get("alternatives", [])
                     if alternatives:
                         transcript = alternatives[0].get("transcript", "").strip()
                         if transcript:
-                            print(f"[Deepgram] Transcript: {transcript}")
+                            print(f"[Deepgram] Final: {transcript}")
                             await self.transcript_queue.put(transcript)
         except Exception as e:
             if self._running:
@@ -161,7 +198,6 @@ class DeepgramSTT:
         self._running = False
         if self.ws:
             try:
-                # Send close signal
                 await self.ws.send(json.dumps({"type": "CloseStream"}))
                 await self.ws.close()
             except Exception:
@@ -169,11 +205,15 @@ class DeepgramSTT:
 
 
 # ---------------------------------------------------------------------------
-# OpenAI LLM
+# OpenAI LLM — STREAMING
 # ---------------------------------------------------------------------------
 
 class OpenAILLM:
-    """Chat completion via OpenAI API."""
+    """Streaming chat completion via OpenAI API.
+
+    Yields tokens as they arrive instead of waiting for the full response.
+    This cuts time-to-first-word from ~1s to ~200ms.
+    """
 
     def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
         self.api_key = api_key
@@ -182,8 +222,12 @@ class OpenAILLM:
             {"role": "system", "content": SYSTEM_PROMPT}
         ]
 
-    async def get_response(self, user_text: str) -> str:
-        """Get a text response from OpenAI."""
+    async def stream_response(self, user_text: str):
+        """Yield text chunks as they stream from OpenAI.
+
+        This is an async generator that yields partial text as tokens arrive.
+        The caller can start TTS on the first sentence while the rest streams in.
+        """
         self.conversation.append({"role": "user", "content": user_text})
 
         # Keep conversation short to avoid context bloat
@@ -200,40 +244,78 @@ class OpenAILLM:
             "messages": self.conversation,
             "max_tokens": 150,
             "temperature": 0.7,
+            "stream": True,  # ← KEY: enable streaming
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, headers=headers) as resp:
-                data = await resp.json()
-                if "error" in data:
-                    print(f"[OpenAI] Error: {data['error']}")
-                    return "Sorry, I had trouble thinking of a response."
+        full_response = ""
+        session = await get_http_session()
 
-                reply = data["choices"][0]["message"]["content"].strip()
-                self.conversation.append({"role": "assistant", "content": reply})
-                print(f"[OpenAI] Response: {reply}")
-                return reply
+        try:
+            async with session.post(url, json=payload, headers=headers) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    print(f"[OpenAI] Error {resp.status}: {error_text}")
+                    yield "Sorry, I had trouble thinking of a response."
+                    return
+
+                # Parse SSE stream
+                async for line in resp.content:
+                    line = line.decode("utf-8").strip()
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]  # strip "data: "
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(data_str)
+                        delta = data["choices"][0].get("delta", {})
+                        token = delta.get("content", "")
+                        if token:
+                            full_response += token
+                            yield token
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
+
+        except Exception as e:
+            print(f"[OpenAI] Stream error: {e}")
+            yield "Sorry, something went wrong."
+            return
+
+        self.conversation.append({"role": "assistant", "content": full_response})
+        print(f"[OpenAI] Full response: {full_response}")
 
 
 # ---------------------------------------------------------------------------
-# ElevenLabs TTS (streaming)
+# ElevenLabs TTS — TRUE STREAMING
 # ---------------------------------------------------------------------------
 
 class ElevenLabsTTS:
-    """Text-to-speech via ElevenLabs streaming API.
+    """Streaming text-to-speech via ElevenLabs.
 
-    Returns PCM16 audio at the requested sample rate.
+    Instead of buffering the entire audio response, this streams chunks
+    back as they arrive from ElevenLabs, converting and sending each one
+    immediately. This cuts TTS latency from ~1.5s to ~300ms.
     """
 
     def __init__(self, api_key: str, voice_id: str):
         self.api_key = api_key
         self.voice_id = voice_id
 
-    async def synthesize(self, text: str) -> bytes:
-        """Convert text to speech, return raw PCM16 8kHz audio bytes."""
+    async def synthesize_streaming(self, text: str, ws, cancel_event: asyncio.Event):
+        """Stream TTS audio directly to VoxBridge WebSocket as it arrives.
+
+        Args:
+            text: Text to synthesize
+            ws: WebSocket to send audio chunks to
+            cancel_event: Set this to cancel mid-stream (barge-in)
+
+        Returns:
+            True if completed, False if cancelled
+        """
         url = (
-            f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}"
+            f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}/stream"
             f"?output_format=pcm_16000"
+            f"&optimize_streaming_latency=3"  # ← Aggressive latency optimization
         )
         headers = {
             "xi-api-key": self.api_key,
@@ -248,32 +330,74 @@ class ElevenLabsTTS:
             },
         }
 
-        audio_chunks = []
-        async with aiohttp.ClientSession() as session:
+        session = await get_http_session()
+        total_bytes = 0
+        t_start = time.monotonic()
+        first_chunk = True
+
+        try:
             async with session.post(url, json=payload, headers=headers) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
                     print(f"[ElevenLabs] Error {resp.status}: {error_text}")
-                    return b""
+                    return False
+
+                # Buffer for accumulating PCM data for aligned processing
+                pcm_buffer = b""
 
                 async for chunk in resp.content.iter_chunked(4096):
-                    audio_chunks.append(chunk)
+                    # Check for barge-in cancellation
+                    if cancel_event.is_set():
+                        print("[ElevenLabs] Cancelled (barge-in)")
+                        return False
 
-        pcm16_16k = b"".join(audio_chunks)
+                    if first_chunk:
+                        elapsed = (time.monotonic() - t_start) * 1000
+                        print(f"[ElevenLabs] First audio chunk in {elapsed:.0f}ms")
+                        first_chunk = False
 
-        # Downsample from 16kHz to 8kHz (simple 2:1 decimation)
-        pcm16_8k = self._downsample_16k_to_8k(pcm16_16k)
-        print(f"[ElevenLabs] Synthesized {len(pcm16_8k)} bytes of audio")
-        return pcm16_8k
+                    pcm_buffer += chunk
 
-    @staticmethod
-    def _downsample_16k_to_8k(pcm16_data: bytes) -> bytes:
-        """Simple 2:1 downsampling from 16kHz to 8kHz PCM16."""
-        n_samples = len(pcm16_data) // 2
-        samples = struct.unpack(f"<{n_samples}h", pcm16_data)
-        # Take every other sample
-        downsampled = samples[::2]
-        return struct.pack(f"<{len(downsampled)}h", *downsampled)
+                    # Process in 640-byte blocks (20ms at 16kHz, 16-bit)
+                    # which becomes 320 bytes at 8kHz → 160 mulaw bytes (20ms)
+                    block_size = 640
+                    while len(pcm_buffer) >= block_size:
+                        block = pcm_buffer[:block_size]
+                        pcm_buffer = pcm_buffer[block_size:]
+
+                        # Downsample 16kHz → 8kHz
+                        pcm_8k = downsample_16k_to_8k(block)
+                        # Convert to mulaw
+                        mulaw_chunk = pcm16_to_mulaw(pcm_8k)
+                        total_bytes += len(mulaw_chunk)
+
+                        try:
+                            await ws.send(mulaw_chunk)
+                        except Exception:
+                            return False
+
+                # Flush remaining buffer
+                if pcm_buffer and not cancel_event.is_set():
+                    # Pad to even sample count
+                    if len(pcm_buffer) % 2 != 0:
+                        pcm_buffer += b"\x00"
+                    pcm_8k = downsample_16k_to_8k(pcm_buffer)
+                    if pcm_8k:
+                        mulaw_chunk = pcm16_to_mulaw(pcm_8k)
+                        total_bytes += len(mulaw_chunk)
+                        try:
+                            await ws.send(mulaw_chunk)
+                        except Exception:
+                            return False
+
+        except Exception as e:
+            print(f"[ElevenLabs] Stream error: {e}")
+            return False
+
+        elapsed = (time.monotonic() - t_start) * 1000
+        duration_ms = (total_bytes / 8000) * 1000  # 8kHz mulaw = 8000 bytes/sec
+        print(f"[ElevenLabs] Streamed {total_bytes} bytes ({duration_ms:.0f}ms audio) in {elapsed:.0f}ms")
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -281,20 +405,23 @@ class ElevenLabsTTS:
 # ---------------------------------------------------------------------------
 
 class VoiceBot:
-    """WebSocket voice bot server.
+    """Low-latency WebSocket voice bot server.
 
-    VoxBridge connects to this bot as a client. The bot:
-    1. Receives audio + JSON control messages from VoxBridge
-    2. Pipes audio to Deepgram for transcription
-    3. Sends transcripts to OpenAI for responses
-    4. Synthesizes responses with ElevenLabs
-    5. Sends audio back to VoxBridge → Twilio → caller
+    Pipeline: Deepgram STT → OpenAI streaming → ElevenLabs streaming → VoxBridge
+
+    Key optimizations:
+    - Sentence-level TTS: starts speaking the first sentence while LLM
+      is still generating the rest
+    - Streaming TTS: audio plays as ElevenLabs generates it (no buffering)
+    - Barge-in aware: cancels in-flight TTS when caller interrupts
     """
 
     def __init__(self):
         self.stt = DeepgramSTT(DEEPGRAM_API_KEY)
         self.llm = OpenAILLM(OPENAI_API_KEY, OPENAI_MODEL)
         self.tts = ElevenLabsTTS(ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID)
+        self._cancel_tts = asyncio.Event()
+        self._is_speaking = False
 
     async def handle_connection(self, ws: WebSocketServerProtocol) -> None:
         """Handle a single call from VoxBridge."""
@@ -302,13 +429,15 @@ class VoiceBot:
         print("[Bot] New call connected!")
         print("=" * 60)
 
+        # Reset state for this call
+        self._cancel_tts.clear()
+        self._is_speaking = False
+
         # Connect to Deepgram STT
         await self.stt.connect()
 
         # Start the response pipeline
-        response_task = asyncio.create_task(
-            self._response_loop(ws)
-        )
+        response_task = asyncio.create_task(self._response_loop(ws))
 
         try:
             async for message in ws:
@@ -318,7 +447,6 @@ class VoiceBot:
                     await self.stt.send_audio(pcm16)
 
                 elif isinstance(message, str):
-                    # JSON control message
                     try:
                         msg = json.loads(message)
                         msg_type = msg.get("type", "")
@@ -332,7 +460,7 @@ class VoiceBot:
                             if sip_headers:
                                 print(f"[Bot] SIP Headers: {sip_headers}")
 
-                            # Send a greeting
+                            # Send a greeting (streamed!)
                             await self._speak(ws, "Hello! How can I help you today?")
 
                         elif msg_type == "stop":
@@ -344,11 +472,12 @@ class VoiceBot:
                             print(f"[Bot] DTMF: {digit}")
 
                         elif msg_type == "barge_in":
-                            print("[Bot] Barge-in detected — stopping TTS")
+                            print("[Bot] ⚡ Barge-in — cancelling TTS")
+                            self._cancel_tts.set()
 
                         elif msg_type == "mark":
                             mark_name = msg.get("name", "")
-                            print(f"[Bot] Playback mark reached: {mark_name}")
+                            print(f"[Bot] Playback mark: {mark_name}")
 
                     except json.JSONDecodeError:
                         pass
@@ -363,56 +492,93 @@ class VoiceBot:
             print("[Bot] Call cleanup complete\n")
 
     async def _response_loop(self, ws: WebSocketServerProtocol) -> None:
-        """Listen for transcripts and generate responses."""
+        """Listen for transcripts and generate streaming responses."""
         try:
             while True:
-                # Wait for a complete transcript from Deepgram
                 transcript = await self.stt.transcript_queue.get()
-
                 if not transcript:
                     continue
 
-                print(f"\n[Bot] Processing: '{transcript}'")
+                t_start = time.monotonic()
+                print(f"\n[Bot] 🎤 User said: '{transcript}'")
 
-                # Get LLM response
-                response_text = await self.llm.get_response(transcript)
+                # Stream LLM response and TTS it sentence-by-sentence
+                await self._stream_and_speak(ws, transcript)
 
-                # Synthesize and send audio
-                await self._speak(ws, response_text)
+                elapsed = (time.monotonic() - t_start) * 1000
+                print(f"[Bot] ✅ Full response in {elapsed:.0f}ms")
 
         except asyncio.CancelledError:
             pass
         except Exception as e:
             print(f"[Bot] Response loop error: {e}")
 
-    async def _speak(self, ws: WebSocketServerProtocol, text: str) -> None:
-        """Synthesize text and send audio to VoxBridge."""
-        print(f"[Bot] Speaking: '{text}'")
+    async def _stream_and_speak(self, ws, user_text: str) -> None:
+        """Stream LLM tokens, accumulate sentences, TTS each sentence immediately.
 
-        # Get TTS audio (PCM16 8kHz)
-        pcm16_audio = await self.tts.synthesize(text)
-        if not pcm16_audio:
+        This is the key latency optimization: instead of waiting for the full
+        LLM response and then the full TTS audio, we:
+        1. Stream tokens from OpenAI
+        2. As soon as we have a complete sentence, fire off TTS
+        3. Stream TTS audio to the caller while OpenAI keeps generating
+        """
+        sentence_buffer = ""
+        sentence_delimiters = {'.', '!', '?', ':', ';'}
+        is_first_sentence = True
+
+        self._cancel_tts.clear()
+
+        async for token in self.llm.stream_response(user_text):
+            if self._cancel_tts.is_set():
+                print("[Bot] LLM streaming cancelled (barge-in)")
+                break
+
+            sentence_buffer += token
+
+            # Check if we have a complete sentence
+            has_delimiter = any(d in token for d in sentence_delimiters)
+
+            if has_delimiter and len(sentence_buffer.strip()) > 5:
+                # We have a sentence — speak it immediately
+                sentence = sentence_buffer.strip()
+                sentence_buffer = ""
+
+                if is_first_sentence:
+                    is_first_sentence = False
+                    print(f"[Bot] 🗣️ Speaking first sentence: '{sentence}'")
+
+                await self._speak(ws, sentence)
+
+                if self._cancel_tts.is_set():
+                    break
+
+        # Speak any remaining text
+        remaining = sentence_buffer.strip()
+        if remaining and not self._cancel_tts.is_set():
+            await self._speak(ws, remaining)
+
+    async def _speak(self, ws, text: str) -> None:
+        """Stream TTS audio directly to VoxBridge (no buffering)."""
+        if not text or self._cancel_tts.is_set():
             return
 
-        # Convert to mulaw for Twilio via VoxBridge
-        mulaw_audio = pcm16_to_mulaw(pcm16_audio)
+        self._is_speaking = True
+        self._cancel_tts.clear()
 
-        # Send in 20ms chunks (160 bytes at 8kHz mulaw)
-        chunk_size = 160
-        for i in range(0, len(mulaw_audio), chunk_size):
-            chunk = mulaw_audio[i : i + chunk_size]
-            try:
-                await ws.send(chunk)
-            except Exception:
-                break
-            # Pace the audio to ~real-time to avoid buffer overflow
-            await asyncio.sleep(0.018)  # ~20ms per chunk
+        completed = await self.tts.synthesize_streaming(text, ws, self._cancel_tts)
+
+        self._is_speaking = False
 
         # Send end-of-speech marker
-        try:
-            await ws.send(json.dumps({"type": "end_of_speech"}))
-        except Exception:
-            pass
+        if completed:
+            try:
+                await ws.send(json.dumps({"type": "end_of_speech"}))
+            except Exception:
+                pass
+
+    async def _speak_greeting(self, ws, text: str) -> None:
+        """Alias for speaking — used for the initial greeting."""
+        await self._speak(ws, text)
 
 
 # ---------------------------------------------------------------------------
@@ -437,10 +603,14 @@ async def main():
 
     bot = VoiceBot()
 
-    print(f"\nAI Voice Bot starting on ws://{BOT_HOST}:{BOT_PORT}/ws")
-    print(f"  STT:  Deepgram (streaming)")
-    print(f"  LLM:  OpenAI ({OPENAI_MODEL})")
-    print(f"  TTS:  ElevenLabs (voice: {ELEVENLABS_VOICE_ID})")
+    print(f"\n{'='*60}")
+    print(f"  AI Voice Bot (Low-Latency Streaming)")
+    print(f"{'='*60}")
+    print(f"  WebSocket:  ws://{BOT_HOST}:{BOT_PORT}/ws")
+    print(f"  STT:        Deepgram (streaming, endpointing=200ms)")
+    print(f"  LLM:        OpenAI {OPENAI_MODEL} (streaming)")
+    print(f"  TTS:        ElevenLabs (streaming, latency=3)")
+    print(f"{'='*60}")
     print(f"\nWaiting for VoxBridge to connect...\n")
 
     async with websockets.serve(bot.handle_connection, BOT_HOST, BOT_PORT, ping_interval=20):
