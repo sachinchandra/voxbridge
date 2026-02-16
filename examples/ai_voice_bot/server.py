@@ -19,9 +19,6 @@ from __future__ import annotations
 
 import asyncio
 
-import websockets
-from websockets.http11 import Response as WsResponse
-
 from voxbridge import VoxBridge, CallSession, AudioFrame
 
 # -------------------------------------------------------------------
@@ -86,6 +83,9 @@ async def handle_mark(session: CallSession, mark_name: str):
 
 # -------------------------------------------------------------------
 # TwiML HTTP handler — served on the same port as WebSocket
+#
+# The http_handler receives an aiohttp request and must return a
+# tuple of (status_code, content_type, body_string).
 # -------------------------------------------------------------------
 
 async def handle_http(request):
@@ -96,15 +96,9 @@ async def handle_http(request):
     """
     path = request.path
 
-    if path == "/voice":
+    if "/voice" in path:
         # Auto-detect the public host from the incoming request
-        host = ""
-        for header_name, header_value in request.headers.raw_items():
-            if header_name.lower() == "host":
-                host = header_value
-                break
-        if not host:
-            host = "localhost:8765"
+        host = request.headers.get("Host", "localhost:8765")
 
         ws_url = f"wss://{host}/"
 
@@ -118,20 +112,10 @@ async def handle_http(request):
 </Response>"""
 
         print(f"[TwiML] Incoming call → streaming to {ws_url}")
-        return WsResponse(
-            200,
-            "OK",
-            websockets.Headers([("Content-Type", "text/xml")]),
-            twiml.encode(),
-        )
+        return (200, "text/xml", twiml)
 
     # Default 404
-    return WsResponse(
-        404,
-        "Not Found",
-        websockets.Headers([("Content-Type", "text/plain")]),
-        b"Not Found",
-    )
+    return (404, "text/plain", "Not Found")
 
 
 # Register the HTTP handler with VoxBridge

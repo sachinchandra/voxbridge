@@ -2,6 +2,10 @@
 
 Provides both client (outbound) and server (inbound) WebSocket transports
 using the ``websockets`` library with asyncio.
+
+When an ``http_handler`` is provided, the server uses ``aiohttp`` instead
+of plain ``websockets`` so that HTTP POST requests (e.g. Twilio TwiML
+webhooks) can be served on the **same** port as the WebSocket endpoint.
 """
 
 from __future__ import annotations
@@ -109,6 +113,12 @@ class WebSocketServer:
     to a handler callback. The callback receives a ``WebSocketServerTransport``
     wrapping the accepted connection.
 
+    When ``http_handler`` is provided, the server uses ``aiohttp`` instead
+    of the plain ``websockets`` library so that both HTTP and WebSocket
+    traffic can be served on the **same** port.  This is useful for
+    serving Twilio TwiML webhooks alongside the Media Stream WebSocket
+    with a single ngrok tunnel.
+
     Usage:
         async def on_connection(transport: WebSocketServerTransport):
             # handle the connection
@@ -134,6 +144,7 @@ class WebSocketServer:
         self._handler = handler
         self._http_handler = http_handler
         self._server: Any = None
+        self._runner: Any = None  # aiohttp runner (hybrid mode only)
 
     async def _ws_handler(self, websocket) -> None:
         """Internal handler for each accepted WebSocket connection."""
@@ -153,51 +164,113 @@ class WebSocketServer:
         else:
             logger.warning("No handler registered for incoming connections")
 
-    async def _process_request(self, connection, request):
-        """Handle plain HTTP requests (non-WebSocket) on the same port.
+    # ------------------------------------------------------------------
+    # aiohttp hybrid mode — HTTP + WebSocket on one port
+    # ------------------------------------------------------------------
 
-        If an ``http_handler`` was provided, non-upgrade HTTP requests
-        (e.g. POST /voice for TwiML) are served by it.  WebSocket
-        upgrade requests pass through untouched.
-        """
-        if self._http_handler is None:
-            return None  # Let websockets handle it normally
+    async def _aiohttp_ws_handler(self, request):
+        """Handle WebSocket upgrade requests via aiohttp."""
+        import aiohttp.web as aioweb
 
-        # Check if this is a WebSocket upgrade request
-        upgrade_header = None
-        for header_name, header_value in request.headers.raw_items():
-            if header_name.lower() == "upgrade":
-                upgrade_header = header_value.lower()
-                break
+        ws = aioweb.WebSocketResponse()
+        await ws.prepare(request)
 
-        if upgrade_header == "websocket":
-            return None  # Let websockets handle the upgrade
+        # Wrap aiohttp WS in a shim so VoxBridge can use it
+        shim = _AiohttpWebSocketShim(ws)
+        transport = WebSocketServerTransport(websocket=shim)
+        if self._handler:
+            try:
+                await self._handler(transport)
+            except Exception as e:
+                logger.error(f"Handler error: {e}")
+        return ws
 
-        # This is a plain HTTP request — delegate to the http_handler
-        try:
-            response = await self._http_handler(request)
-            return response
-        except Exception as e:
-            logger.error(f"HTTP handler error: {e}")
-            from websockets.http11 import Response
-            return Response(500, "Internal Server Error", websockets.Headers())
+    async def _aiohttp_http_handler(self, request):
+        """Handle plain HTTP requests via the user-supplied http_handler."""
+        import aiohttp.web as aioweb
+
+        if self._http_handler:
+            try:
+                status, content_type, body = await self._http_handler(request)
+                return aioweb.Response(
+                    status=status,
+                    body=body,
+                    content_type=content_type,
+                )
+            except Exception as e:
+                logger.error(f"HTTP handler error: {e}")
+                return aioweb.Response(status=500, text="Internal Server Error")
+        return aioweb.Response(status=404, text="Not Found")
+
+    async def _start_hybrid(self) -> None:
+        """Start an aiohttp server that handles both HTTP and WebSocket."""
+        import aiohttp.web as aioweb
+
+        app = aioweb.Application()
+
+        # Register all HTTP routes via a catch-all that checks for WS upgrade
+        app.router.add_route("*", "/{path_info:.*}", self._aiohttp_route_handler)
+
+        self._runner = aioweb.AppRunner(app)
+        await self._runner.setup()
+        site = aioweb.TCPSite(self._runner, self.host, self.port)
+        await site.start()
+        logger.info(
+            f"Hybrid HTTP+WebSocket server listening on "
+            f"http://{self.host}:{self.port}"
+        )
+
+    async def _aiohttp_route_handler(self, request):
+        """Route handler: upgrade to WS if requested, else serve HTTP."""
+        import aiohttp.web as aioweb
+
+        # Check if it's a WebSocket upgrade
+        if (
+            request.headers.get("Upgrade", "").lower() == "websocket"
+            or request.headers.get("Connection", "").lower() == "upgrade"
+        ):
+            return await self._aiohttp_ws_handler(request)
+
+        # Plain HTTP — delegate to http_handler
+        return await self._aiohttp_http_handler(request)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     async def start(self) -> None:
         """Start the WebSocket server."""
-        logger.info(f"Starting WebSocket server on {self.host}:{self.port}{self.path}")
-        self._server = await websockets.asyncio.server.serve(
-            self._ws_handler,
-            self.host,
-            self.port,
-            process_request=self._process_request if self._http_handler else None,
-        )
-        logger.info(f"WebSocket server listening on ws://{self.host}:{self.port}{self.path}")
+        if self._http_handler:
+            logger.info(
+                f"Starting hybrid HTTP+WS server on "
+                f"{self.host}:{self.port}{self.path}"
+            )
+            await self._start_hybrid()
+        else:
+            logger.info(
+                f"Starting WebSocket server on "
+                f"{self.host}:{self.port}{self.path}"
+            )
+            self._server = await websockets.asyncio.server.serve(
+                self._ws_handler,
+                self.host,
+                self.port,
+            )
+            logger.info(
+                f"WebSocket server listening on "
+                f"ws://{self.host}:{self.port}{self.path}"
+            )
 
     async def stop(self) -> None:
         """Stop the WebSocket server."""
+        if self._runner:
+            await self._runner.cleanup()
+            self._runner = None
+            logger.info("Hybrid server stopped")
         if self._server:
             self._server.close()
             await self._server.wait_closed()
+            self._server = None
             logger.info("WebSocket server stopped")
 
     async def serve_forever(self) -> None:
@@ -207,3 +280,44 @@ class WebSocketServer:
             await asyncio.Future()  # Run forever
         except asyncio.CancelledError:
             await self.stop()
+
+
+class _AiohttpWebSocketShim:
+    """Thin shim that makes an ``aiohttp.WebSocketResponse`` look like a
+    ``websockets`` server connection so that :class:`WebSocketServerTransport`
+    can use it unchanged.
+    """
+
+    def __init__(self, ws) -> None:
+        self._ws = ws
+        self.open = True
+
+    async def send(self, data: bytes | str) -> None:
+        if isinstance(data, bytes):
+            await self._ws.send_bytes(data)
+        else:
+            await self._ws.send_str(data)
+
+    async def recv(self) -> bytes | str:
+        import aiohttp
+
+        msg = await self._ws.receive()
+        if msg.type == aiohttp.WSMsgType.TEXT:
+            return msg.data
+        elif msg.type == aiohttp.WSMsgType.BINARY:
+            return msg.data
+        elif msg.type in (
+            aiohttp.WSMsgType.CLOSE,
+            aiohttp.WSMsgType.CLOSING,
+            aiohttp.WSMsgType.CLOSED,
+        ):
+            self.open = False
+            raise websockets.exceptions.ConnectionClosed(None, None)
+        elif msg.type == aiohttp.WSMsgType.ERROR:
+            self.open = False
+            raise websockets.exceptions.ConnectionClosed(None, None)
+        return msg.data
+
+    async def close(self) -> None:
+        self.open = False
+        await self._ws.close()
