@@ -21,6 +21,26 @@ from loguru import logger
 from voxbridge.transports.base import BaseTransport
 
 
+def _ws_is_open(ws: Any) -> bool:
+    """Check if a websockets connection is still open.
+
+    Compatible with both websockets v12+ (no .open attribute)
+    and older versions.
+    """
+    # websockets v12+: use .state
+    if hasattr(ws, "state"):
+        try:
+            from websockets.protocol import State
+            return ws.state is State.OPEN
+        except ImportError:
+            pass
+    # Older versions or shims: use .open
+    if hasattr(ws, "open"):
+        return ws.open
+    # Fallback: assume open if ws exists
+    return ws is not None
+
+
 class WebSocketClientTransport(BaseTransport):
     """WebSocket client transport for connecting to a remote endpoint.
 
@@ -62,7 +82,7 @@ class WebSocketClientTransport(BaseTransport):
             logger.info("WebSocket client disconnected")
 
     def is_connected(self) -> bool:
-        return self._ws is not None and self._ws.open
+        return self._ws is not None and _ws_is_open(self._ws)
 
 
 class WebSocketServerTransport(BaseTransport):
@@ -103,7 +123,7 @@ class WebSocketServerTransport(BaseTransport):
             logger.info("Provider WebSocket disconnected")
 
     def is_connected(self) -> bool:
-        return self._ws is not None and self._ws.open
+        return self._ws is not None and _ws_is_open(self._ws)
 
 
 class WebSocketServer:
