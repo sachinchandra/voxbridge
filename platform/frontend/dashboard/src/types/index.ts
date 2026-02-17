@@ -51,3 +51,129 @@ export interface AuthResponse {
   token_type: string;
   customer: Customer;
 }
+
+// ── Agents ──────────────────────────────────────────────────────
+
+export type AgentStatus = 'draft' | 'active' | 'paused' | 'archived';
+
+export interface Agent {
+  id: string;
+  name: string;
+  status: AgentStatus;
+  system_prompt: string;
+  first_message: string;
+  end_call_phrases: string[];
+  stt_provider: string;
+  stt_config: Record<string, any>;
+  llm_provider: string;
+  llm_model: string;
+  llm_config: Record<string, any>;
+  tts_provider: string;
+  tts_voice_id: string;
+  tts_config: Record<string, any>;
+  max_duration_seconds: number;
+  interruption_enabled: boolean;
+  tools: any[];
+  knowledge_base_id: string | null;
+  escalation_config: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentListItem {
+  id: string;
+  name: string;
+  status: AgentStatus;
+  llm_provider: string;
+  llm_model: string;
+  tts_provider: string;
+  total_calls: number;
+  avg_duration: number;
+  created_at: string;
+}
+
+export interface AgentStats {
+  agent_id: string;
+  agent_name: string;
+  total_calls: number;
+  completed_calls: number;
+  failed_calls: number;
+  escalated_calls: number;
+  avg_duration_seconds: number;
+  total_duration_minutes: number;
+  avg_sentiment: number | null;
+  resolution_rate: number;
+  containment_rate: number;
+  total_cost_cents: number;
+  calls_by_day: Array<{ date: string; calls: number }>;
+}
+
+export interface AgentCreatePayload {
+  name: string;
+  system_prompt?: string;
+  first_message?: string;
+  end_call_phrases?: string[];
+  stt_provider?: string;
+  llm_provider?: string;
+  llm_model?: string;
+  tts_provider?: string;
+  tts_voice_id?: string;
+  max_duration_seconds?: number;
+  interruption_enabled?: boolean;
+  escalation_config?: Record<string, any>;
+}
+
+// ── Calls ───────────────────────────────────────────────────────
+
+export type CallDirection = 'inbound' | 'outbound';
+export type CallStatusType = 'initiated' | 'ringing' | 'in_progress' | 'completed' | 'failed' | 'no_answer' | 'busy';
+
+export interface CallRecord {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  direction: CallDirection;
+  from_number: string;
+  to_number: string;
+  started_at: string;
+  ended_at: string | null;
+  duration_seconds: number;
+  status: CallStatusType;
+  end_reason: string;
+  escalated_to_human: boolean;
+  sentiment_score: number | null;
+  resolution: string;
+  cost_cents: number;
+  created_at: string;
+}
+
+export interface CallDetail extends CallRecord {
+  transcript: Array<{ role: string; content: string; timestamp?: string }>;
+  recording_url: string;
+  metadata: Record<string, any>;
+  tool_calls: Array<{
+    id: string;
+    function_name: string;
+    arguments: Record<string, any>;
+    result: Record<string, any>;
+    duration_ms: number;
+    created_at: string;
+  }>;
+}
+
+export interface CallsOverview {
+  total_calls: number;
+  ai_handled: number;
+  escalated: number;
+  containment_rate: number;
+  avg_duration_seconds: number;
+  total_cost_cents: number;
+  total_cost_dollars: number;
+}
+
+export interface CallsListResponse {
+  calls: CallRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+}

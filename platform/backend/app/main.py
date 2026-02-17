@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from app.config import settings
-from app.api import auth, keys, usage, billing
+from app.api import agents, auth, billing, calls, keys, usage
 
 # ──────────────────────────────────────────────────────────────────
 # Application factory
@@ -21,8 +21,8 @@ def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
         title="VoxBridge Platform API",
-        description="SaaS backend for VoxBridge - Universal telephony adapter SDK",
-        version="0.1.0",
+        description="AI-First Contact Center Platform — Replace Genesys, not integrate with it",
+        version="0.2.0",
         docs_url="/docs",
         redoc_url="/redoc",
     )
@@ -41,6 +41,8 @@ def create_app() -> FastAPI:
     app.include_router(keys.router, prefix="/api/v1")
     app.include_router(usage.router, prefix="/api/v1")
     app.include_router(billing.router, prefix="/api/v1")
+    app.include_router(agents.router, prefix="/api/v1")
+    app.include_router(calls.router, prefix="/api/v1")
 
     # Health check
     @app.get("/health")
@@ -50,8 +52,8 @@ def create_app() -> FastAPI:
     @app.get("/")
     async def root():
         return {
-            "name": "VoxBridge Platform API",
-            "version": "0.1.0",
+            "name": "VoxBridge AI Contact Center API",
+            "version": "0.2.0",
             "docs": "/docs",
         }
 

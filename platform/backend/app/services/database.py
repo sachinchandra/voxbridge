@@ -13,11 +13,17 @@ from loguru import logger
 
 from app.config import settings
 from app.models.database import (
+    Agent,
+    AgentStatus,
     ApiKey,
     ApiKeyStatus,
+    Call,
+    CallStatus,
     Customer,
+    PhoneNumber,
     PlanTier,
     Subscription,
+    ToolCall,
     UsageRecord,
 )
 
@@ -357,4 +363,325 @@ def get_active_subscription(customer_id: str) -> Subscription | None:
     )
     if result.data:
         return Subscription(**result.data[0])
+    return None
+
+
+# ──────────────────────────────────────────────────────────────────
+# Agent operations
+# ──────────────────────────────────────────────────────────────────
+
+def create_agent(customer_id: str, data: dict) -> Agent:
+    """Create a new AI agent."""
+    client = get_client()
+    agent = Agent(customer_id=customer_id, **data)
+    row = agent.model_dump()
+    row["created_at"] = row["created_at"].isoformat()
+    row["updated_at"] = row["updated_at"].isoformat()
+    # JSONB fields need to be serializable (already are as list/dict)
+    result = client.table("agents").insert(row).execute()
+    return Agent(**result.data[0])
+
+
+def get_agent(agent_id: str, customer_id: str) -> Agent | None:
+    """Get a single agent by ID, scoped to customer."""
+    client = get_client()
+    result = (
+        client.table("agents")
+        .select("*")
+        .eq("id", agent_id)
+        .eq("customer_id", customer_id)
+        .execute()
+    )
+    if result.data:
+        return Agent(**result.data[0])
+    return None
+
+
+def list_agents(customer_id: str) -> list[Agent]:
+    """List all agents for a customer."""
+    client = get_client()
+    result = (
+        client.table("agents")
+        .select("*")
+        .eq("customer_id", customer_id)
+        .neq("status", "archived")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return [Agent(**row) for row in result.data]
+
+
+def update_agent(agent_id: str, customer_id: str, updates: dict) -> Agent | None:
+    """Update an agent. Only non-None fields are applied."""
+    client = get_client()
+    # Filter out None values
+    changes = {k: v for k, v in updates.items() if v is not None}
+    if not changes:
+        return get_agent(agent_id, customer_id)
+
+    changes["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    result = (
+        client.table("agents")
+        .update(changes)
+        .eq("id", agent_id)
+        .eq("customer_id", customer_id)
+        .execute()
+    )
+    if result.data:
+        return Agent(**result.data[0])
+    return None
+
+
+def delete_agent(agent_id: str, customer_id: str) -> bool:
+    """Soft-delete an agent by setting status to archived."""
+    client = get_client()
+    result = (
+        client.table("agents")
+        .update({
+            "status": AgentStatus.ARCHIVED.value,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        .eq("id", agent_id)
+        .eq("customer_id", customer_id)
+        .execute()
+    )
+    return len(result.data) > 0
+
+
+def count_agents(customer_id: str) -> int:
+    """Count active (non-archived) agents for a customer."""
+    client = get_client()
+    result = (
+        client.table("agents")
+        .select("id", count="exact")
+        .eq("customer_id", customer_id)
+        .neq("status", "archived")
+        .execute()
+    )
+    return result.count or 0
+
+
+# ──────────────────────────────────────────────────────────────────
+# Call operations
+# ──────────────────────────────────────────────────────────────────
+
+def create_call(data: dict) -> Call:
+    """Create a call record."""
+    client = get_client()
+    call = Call(**data)
+    row = call.model_dump()
+    row["created_at"] = row["created_at"].isoformat()
+    row["started_at"] = row["started_at"].isoformat()
+    if row.get("ended_at"):
+        row["ended_at"] = row["ended_at"].isoformat()
+    result = client.table("calls").insert(row).execute()
+    return Call(**result.data[0])
+
+
+def get_call(call_id: str, customer_id: str) -> Call | None:
+    """Get a single call by ID, scoped to customer."""
+    client = get_client()
+    result = (
+        client.table("calls")
+        .select("*")
+        .eq("id", call_id)
+        .eq("customer_id", customer_id)
+        .execute()
+    )
+    if result.data:
+        return Call(**result.data[0])
+    return None
+
+
+def list_calls(
+    customer_id: str,
+    agent_id: str | None = None,
+    status: str | None = None,
+    direction: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[Call], int]:
+    """List calls for a customer with optional filters. Returns (calls, total_count)."""
+    client = get_client()
+    query = (
+        client.table("calls")
+        .select("*", count="exact")
+        .eq("customer_id", customer_id)
+    )
+
+    if agent_id:
+        query = query.eq("agent_id", agent_id)
+    if status:
+        query = query.eq("status", status)
+    if direction:
+        query = query.eq("direction", direction)
+
+    query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
+    result = query.execute()
+
+    calls = [Call(**row) for row in result.data]
+    total = result.count or len(calls)
+    return calls, total
+
+
+def update_call(call_id: str, updates: dict) -> Call | None:
+    """Update a call record (used for in-progress updates)."""
+    client = get_client()
+    if "ended_at" in updates and updates["ended_at"]:
+        updates["ended_at"] = updates["ended_at"].isoformat() if hasattr(updates["ended_at"], "isoformat") else updates["ended_at"]
+
+    result = (
+        client.table("calls")
+        .update(updates)
+        .eq("id", call_id)
+        .execute()
+    )
+    if result.data:
+        return Call(**result.data[0])
+    return None
+
+
+def get_calls_for_agent(
+    agent_id: str,
+    customer_id: str,
+    start_date: datetime | None = None,
+) -> list[Call]:
+    """Get all calls for an agent, optionally filtered by start date."""
+    client = get_client()
+    query = (
+        client.table("calls")
+        .select("*")
+        .eq("agent_id", agent_id)
+        .eq("customer_id", customer_id)
+    )
+    if start_date:
+        query = query.gte("created_at", start_date.isoformat())
+
+    result = query.order("created_at", desc=True).execute()
+    return [Call(**row) for row in result.data]
+
+
+def get_agent_stats(agent_id: str, customer_id: str) -> dict:
+    """Compute performance stats for an agent."""
+    # Get all calls for this agent
+    calls = get_calls_for_agent(agent_id, customer_id)
+
+    total = len(calls)
+    if total == 0:
+        return {
+            "total_calls": 0,
+            "completed_calls": 0,
+            "failed_calls": 0,
+            "escalated_calls": 0,
+            "avg_duration_seconds": 0.0,
+            "total_duration_minutes": 0.0,
+            "avg_sentiment": None,
+            "resolution_rate": 0.0,
+            "containment_rate": 0.0,
+            "total_cost_cents": 0,
+            "calls_by_day": [],
+        }
+
+    completed = sum(1 for c in calls if c.status == CallStatus.COMPLETED)
+    failed = sum(1 for c in calls if c.status == CallStatus.FAILED)
+    escalated = sum(1 for c in calls if c.escalated_to_human)
+    total_duration = sum(c.duration_seconds for c in calls)
+    total_cost = sum(c.cost_cents for c in calls)
+
+    sentiments = [c.sentiment_score for c in calls if c.sentiment_score is not None]
+    avg_sentiment = sum(sentiments) / len(sentiments) if sentiments else None
+
+    resolved = sum(1 for c in calls if c.resolution == "resolved")
+    resolution_rate = (resolved / total * 100) if total > 0 else 0.0
+    containment_rate = ((total - escalated) / total * 100) if total > 0 else 0.0
+
+    # Daily breakdown
+    daily: dict[str, int] = {}
+    for c in calls:
+        day = c.created_at.strftime("%Y-%m-%d")
+        daily[day] = daily.get(day, 0) + 1
+
+    return {
+        "total_calls": total,
+        "completed_calls": completed,
+        "failed_calls": failed,
+        "escalated_calls": escalated,
+        "avg_duration_seconds": round(total_duration / total, 2),
+        "total_duration_minutes": round(total_duration / 60.0, 2),
+        "avg_sentiment": round(avg_sentiment, 3) if avg_sentiment is not None else None,
+        "resolution_rate": round(resolution_rate, 1),
+        "containment_rate": round(containment_rate, 1),
+        "total_cost_cents": total_cost,
+        "calls_by_day": [{"date": k, "calls": v} for k, v in sorted(daily.items())],
+    }
+
+
+# ──────────────────────────────────────────────────────────────────
+# Tool Call operations
+# ──────────────────────────────────────────────────────────────────
+
+def create_tool_call(data: dict) -> ToolCall:
+    """Record a tool/function call made during a call."""
+    client = get_client()
+    tool_call = ToolCall(**data)
+    row = tool_call.model_dump()
+    row["created_at"] = row["created_at"].isoformat()
+    result = client.table("tool_calls").insert(row).execute()
+    return ToolCall(**result.data[0])
+
+
+def get_tool_calls_for_call(call_id: str) -> list[ToolCall]:
+    """Get all tool calls for a given call."""
+    client = get_client()
+    result = (
+        client.table("tool_calls")
+        .select("*")
+        .eq("call_id", call_id)
+        .order("created_at")
+        .execute()
+    )
+    return [ToolCall(**row) for row in result.data]
+
+
+# ──────────────────────────────────────────────────────────────────
+# Phone Number operations
+# ──────────────────────────────────────────────────────────────────
+
+def create_phone_number(data: dict) -> PhoneNumber:
+    """Create a phone number record."""
+    client = get_client()
+    phone = PhoneNumber(**data)
+    row = phone.model_dump()
+    row["created_at"] = row["created_at"].isoformat()
+    result = client.table("phone_numbers").insert(row).execute()
+    return PhoneNumber(**result.data[0])
+
+
+def list_phone_numbers(customer_id: str) -> list[PhoneNumber]:
+    """List all phone numbers for a customer."""
+    client = get_client()
+    result = (
+        client.table("phone_numbers")
+        .select("*")
+        .eq("customer_id", customer_id)
+        .eq("status", "active")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return [PhoneNumber(**row) for row in result.data]
+
+
+def assign_phone_number(phone_id: str, customer_id: str, agent_id: str | None) -> PhoneNumber | None:
+    """Assign or unassign a phone number to/from an agent."""
+    client = get_client()
+    result = (
+        client.table("phone_numbers")
+        .update({"agent_id": agent_id})
+        .eq("id", phone_id)
+        .eq("customer_id", customer_id)
+        .execute()
+    )
+    if result.data:
+        return PhoneNumber(**result.data[0])
     return None

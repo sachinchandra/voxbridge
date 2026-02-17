@@ -5,6 +5,11 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Dashboard from './pages/Dashboard';
+import Agents from './pages/Agents';
+import AgentEditor from './pages/AgentEditor';
+import Calls from './pages/Calls';
+import CallDetail from './pages/CallDetail';
+import Analytics from './pages/Analytics';
 import ApiKeys from './pages/ApiKeys';
 import Usage from './pages/Usage';
 import Billing from './pages/Billing';
@@ -61,6 +66,11 @@ function App() {
             }
           >
             <Route index element={<Dashboard />} />
+            <Route path="agents" element={<Agents />} />
+            <Route path="agents/:agentId" element={<AgentEditor />} />
+            <Route path="calls" element={<Calls />} />
+            <Route path="calls/:callId" element={<CallDetail />} />
+            <Route path="analytics" element={<Analytics />} />
             <Route path="quickstart" element={<QuickStart />} />
             <Route path="keys" element={<ApiKeys />} />
             <Route path="usage" element={<Usage />} />
