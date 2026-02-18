@@ -37,6 +37,7 @@ from voxbridge.core.events import (
     HoldStarted,
     Mark,
 )
+from voxbridge.pipeline.orchestrator import PipelineConfig, PipelineOrchestrator
 from voxbridge.platform import PlatformClient
 from voxbridge.serializers.base import BaseSerializer
 from voxbridge.serializers.registry import serializer_registry
@@ -245,7 +246,279 @@ class VoxBridge:
     async def _handle_provider_connection(
         self, provider_transport: WebSocketServerTransport
     ) -> None:
-        """Handle a new inbound connection from a telephony provider."""
+        """Handle a new inbound connection from a telephony provider.
+
+        Routes to either the pipeline mode handler (built-in AI) or the
+        bot mode handler (external WebSocket bot) based on configuration.
+        """
+        if self.config.pipeline_mode:
+            await self._handle_pipeline_connection(provider_transport)
+        else:
+            await self._handle_bot_connection(provider_transport)
+
+    async def _handle_pipeline_connection(
+        self, provider_transport: WebSocketServerTransport
+    ) -> None:
+        """Handle a connection using the built-in AI pipeline.
+
+        Instead of connecting to an external bot WebSocket, this creates a
+        PipelineOrchestrator that processes audio through STT→LLM→TTS internally.
+        """
+        # Create serializer for this provider
+        serializer = serializer_registry.create(self.config.provider.type)
+
+        # Create session
+        session = self.sessions.create(
+            provider_transport=provider_transport,
+            provider_serializer=serializer,
+            provider=self.config.provider.type,
+        )
+
+        logger.info(
+            f"New pipeline connection: session={session.session_id}"
+        )
+
+        # Set up codec conversion (provider codec ↔ PCM16 for pipeline)
+        provider_codec = Codec(self.config.audio.input_codec)
+        pipeline_codec = Codec.PCM16
+        provider_rate = self.config.audio.sample_rate
+        pipeline_rate = 16000  # STT typically wants 16kHz
+        session.setup_resamplers(provider_rate, pipeline_rate)
+
+        # Configure barge-in VAD
+        session.barge_in_detector.codec = self.config.audio.input_codec
+        session.barge_in_enabled = self.config.pipeline.interruption_enabled
+
+        # Create pipeline config from bridge config
+        pipe_cfg = self.config.pipeline
+        pipeline_config = PipelineConfig(
+            stt_provider=pipe_cfg.stt.provider,
+            stt_config=pipe_cfg.stt.config,
+            llm_provider=pipe_cfg.llm.provider,
+            llm_config=pipe_cfg.llm.config,
+            tts_provider=pipe_cfg.tts.provider,
+            tts_config=pipe_cfg.tts.config,
+            system_prompt=pipe_cfg.system_prompt,
+            first_message=pipe_cfg.first_message,
+            tools=pipe_cfg.tools,
+            escalation_enabled=pipe_cfg.escalation_enabled,
+            escalation_config=pipe_cfg.escalation_config,
+            max_call_duration_seconds=pipe_cfg.max_call_duration_seconds,
+            llm_temperature=pipe_cfg.llm_temperature,
+            llm_max_tokens=pipe_cfg.llm_max_tokens,
+            silence_threshold_ms=pipe_cfg.silence_threshold_ms,
+            interruption_enabled=pipe_cfg.interruption_enabled,
+            end_call_phrases=pipe_cfg.end_call_phrases,
+        )
+
+        # Create orchestrator
+        pipeline = PipelineOrchestrator(pipeline_config)
+
+        # Wire up audio output: pipeline → codec convert → serialize → provider
+        async def send_audio_to_provider(audio: bytes) -> None:
+            """Convert pipeline PCM16 audio and send to telephony provider."""
+            session.audio_bytes_out += len(audio)
+            if not session.is_bot_speaking:
+                session.is_bot_speaking = True
+                session.barge_in_detector.reset()
+
+            # Convert from pipeline PCM16 to provider codec
+            converted = session.convert_outbound_audio(
+                audio, pipeline_codec, provider_codec
+            )
+            audio_event = AudioFrame(
+                call_id=session.call_id,
+                codec=provider_codec,
+                sample_rate=self.config.audio.sample_rate,
+                data=converted,
+            )
+            wire_msg = await serializer.serialize(audio_event)
+            if wire_msg is not None:
+                await provider_transport.send(wire_msg)
+
+        pipeline.set_audio_output_callback(send_audio_to_provider)
+
+        # Wire up call end callback
+        async def on_pipeline_call_end(reason: str) -> None:
+            session.end()
+            end_event = CallEnded(call_id=session.call_id, reason=reason)
+            wire_msg = await serializer.serialize(end_event)
+            if wire_msg:
+                await provider_transport.send(
+                    wire_msg if isinstance(wire_msg, str) else json.dumps(wire_msg)
+                )
+
+        pipeline.set_call_end_callback(on_pipeline_call_end)
+
+        # Wire up escalation callback
+        async def on_pipeline_escalation(result) -> None:
+            logger.info(f"Pipeline escalation: {result.reason}")
+            # Dispatch escalation to event handlers
+            for handler in self._handlers.get("on_event", []):
+                try:
+                    from voxbridge.core.events import CustomEvent
+                    event = CustomEvent(
+                        call_id=session.call_id,
+                        custom_type="escalation",
+                        payload={
+                            "reason": result.reason,
+                            "trigger": result.trigger,
+                            "confidence": result.confidence,
+                        },
+                    )
+                    await handler(session, event)
+                except Exception as e:
+                    logger.error(f"Escalation handler error: {e}")
+
+        pipeline.set_escalation_callback(on_pipeline_escalation)
+
+        # Start pipeline
+        try:
+            await pipeline.start()
+
+            # Run the provider→pipeline loop
+            await self._provider_to_pipeline_loop(
+                session, pipeline, serializer, provider_transport,
+                provider_codec, pipeline_codec,
+            )
+
+        except Exception as e:
+            logger.error(f"Pipeline error for session {session.session_id}: {e}")
+        finally:
+            await pipeline.stop()
+            session.end()
+
+            # Report usage
+            if self._platform and self._platform.report_usage:
+                try:
+                    await self._platform.report_call(
+                        session_id=session.session_id,
+                        call_id=session.call_id,
+                        provider=self.config.provider.type,
+                        duration_seconds=session.duration_ms / 1000.0,
+                        audio_bytes_in=session.audio_bytes_in,
+                        audio_bytes_out=session.audio_bytes_out,
+                        status="completed",
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to report usage: {e}")
+
+            self.sessions.remove(session.session_id)
+            logger.info(
+                f"Pipeline session ended: {session.session_id} "
+                f"(duration: {session.duration_ms}ms, "
+                f"tokens: {pipeline.context.total_tokens})"
+            )
+
+    async def _provider_to_pipeline_loop(
+        self,
+        session: CallSession,
+        pipeline: PipelineOrchestrator,
+        serializer: BaseSerializer,
+        provider: WebSocketServerTransport,
+        provider_codec: Codec,
+        pipeline_codec: Codec,
+    ) -> None:
+        """Provider → Deserialize → Codec Convert → Pipeline.
+
+        Similar to _provider_to_bot_loop but routes audio to the internal
+        pipeline instead of an external bot WebSocket.
+        """
+        try:
+            while session.is_active and provider.is_connected():
+                raw = await provider.recv()
+
+                # Deserialize provider message
+                events = await serializer.deserialize(raw)
+
+                # Handshake response
+                if isinstance(raw, (str, dict)):
+                    msg = json.loads(raw) if isinstance(raw, str) else raw
+                    response = serializer.handshake_response(msg)
+                    if response:
+                        await provider.send(json.dumps(response))
+
+                for event in events:
+                    await self._dispatch_event(session, event)
+
+                    if isinstance(event, CallStarted):
+                        session.call_id = event.call_id
+                        session.from_number = event.from_number
+                        session.to_number = event.to_number
+                        if event.sip_headers:
+                            session.sip_headers = event.sip_headers
+
+                    elif isinstance(event, AudioFrame):
+                        if event.data:
+                            session.audio_bytes_in += len(event.data)
+
+                        # Barge-in detection
+                        if (
+                            session.is_bot_speaking
+                            and session.barge_in_enabled
+                            and event.data
+                            and session.barge_in_detector.check(event.data)
+                        ):
+                            logger.info(
+                                f"Barge-in detected on session "
+                                f"{session.session_id}"
+                            )
+                            cleared = session.clear_outbound_audio()
+                            logger.debug(
+                                f"Cleared {cleared} audio chunks from queue"
+                            )
+
+                            # Clear provider audio
+                            clear_event = ClearAudio(call_id=session.call_id)
+                            clear_msg = await serializer.serialize(clear_event)
+                            if clear_msg:
+                                await provider.send(clear_msg)
+
+                            # Notify pipeline of barge-in
+                            await pipeline.handle_barge_in()
+
+                            # Dispatch barge-in event
+                            barge_event = BargeIn(call_id=session.call_id)
+                            await self._dispatch_event(session, barge_event)
+
+                        # Process through audio handlers
+                        frame = event
+                        for handler in self._handlers["on_audio"]:
+                            result = await handler(session, frame)
+                            if result is None:
+                                frame = None
+                                break
+                            frame = result
+
+                        if frame and frame.data:
+                            # Convert to PCM16 for pipeline
+                            converted = session.convert_inbound_audio(
+                                frame.data, provider_codec, pipeline_codec
+                            )
+                            # Feed to pipeline STT
+                            await pipeline.feed_audio(converted)
+
+                    elif isinstance(event, CallEnded):
+                        session.end()
+                        return
+
+                    elif isinstance(event, DTMFReceived):
+                        await pipeline.handle_dtmf(event.digit)
+
+                    elif isinstance(event, Mark):
+                        if event.name in session._pending_marks:
+                            session._pending_marks.remove(event.name)
+                        if not session._pending_marks:
+                            session.is_bot_speaking = False
+
+        except Exception as e:
+            if session.is_active:
+                logger.error(f"Provider-to-pipeline loop error: {e}")
+
+    async def _handle_bot_connection(
+        self, provider_transport: WebSocketServerTransport
+    ) -> None:
+        """Handle a connection using an external WebSocket bot (original mode)."""
         # Create serializer for this provider
         serializer = serializer_registry.create(self.config.provider.type)
 

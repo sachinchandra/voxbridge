@@ -24,11 +24,11 @@ Quick start (programmatic):
     bridge.run()
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # Core
 from voxbridge.bridge import VoxBridge
-from voxbridge.config import BridgeConfig, SaaSConfig, load_config
+from voxbridge.config import BridgeConfig, PipelineModeConfig, SaaSConfig, load_config
 from voxbridge.platform import PlatformClient
 from voxbridge.session import BargeInDetector, CallSession, SessionStore, compute_audio_energy
 
@@ -67,10 +67,21 @@ from voxbridge.transports.websocket import (
     WebSocketServerTransport,
 )
 
+# AI Pipeline
+from voxbridge.pipeline.orchestrator import PipelineConfig, PipelineOrchestrator
+from voxbridge.pipeline.context import ConversationContext
+from voxbridge.pipeline.turn_detector import TurnDetector
+from voxbridge.pipeline.escalation import EscalationDetector, EscalationResult
+
+# AI Providers
+from voxbridge.providers.base import BaseLLM, BaseSTT, BaseTTS
+from voxbridge.providers.registry import provider_registry
+
 __all__ = [
     # Core
     "VoxBridge",
     "BridgeConfig",
+    "PipelineModeConfig",
     "SaaSConfig",
     "PlatformClient",
     "load_config",
@@ -106,4 +117,16 @@ __all__ = [
     "WebSocketClientTransport",
     "WebSocketServerTransport",
     "WebSocketServer",
+    # AI Pipeline
+    "PipelineOrchestrator",
+    "PipelineConfig",
+    "ConversationContext",
+    "TurnDetector",
+    "EscalationDetector",
+    "EscalationResult",
+    # AI Providers
+    "BaseSTT",
+    "BaseLLM",
+    "BaseTTS",
+    "provider_registry",
 ]

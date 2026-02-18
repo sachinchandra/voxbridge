@@ -56,20 +56,78 @@ class LoggingConfig(BaseModel):
     level: str = "INFO"
 
 
+class PipelineProviderConfig(BaseModel):
+    """Configuration for an AI pipeline provider (STT, LLM, or TTS)."""
+
+    provider: str = ""
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class PipelineModeConfig(BaseModel):
+    """Configuration for the built-in AI pipeline mode.
+
+    When pipeline_mode is enabled, the bridge uses the internal
+    STT→LLM→TTS pipeline instead of connecting to an external bot WebSocket.
+    """
+
+    enabled: bool = False
+    stt: PipelineProviderConfig = Field(
+        default_factory=lambda: PipelineProviderConfig(provider="deepgram")
+    )
+    llm: PipelineProviderConfig = Field(
+        default_factory=lambda: PipelineProviderConfig(provider="openai")
+    )
+    tts: PipelineProviderConfig = Field(
+        default_factory=lambda: PipelineProviderConfig(provider="elevenlabs")
+    )
+
+    # Agent configuration
+    system_prompt: str = "You are a helpful AI assistant on a phone call. Be concise and conversational."
+    first_message: str = ""
+    tools: list[dict[str, Any]] = Field(default_factory=list)
+    end_call_phrases: list[str] = Field(default_factory=lambda: [
+        "goodbye", "bye bye", "end the call", "hang up",
+    ])
+
+    # Pipeline settings
+    llm_temperature: float = 0.7
+    llm_max_tokens: int = 512
+    silence_threshold_ms: float = 700.0
+    interruption_enabled: bool = True
+    max_call_duration_seconds: int = 1800
+
+    # Escalation
+    escalation_enabled: bool = True
+    escalation_config: dict[str, Any] = Field(default_factory=dict)
+
+
 class BridgeConfig(BaseModel):
     """Top-level VoxBridge configuration.
 
     Can be constructed programmatically, from a dict, or loaded from YAML.
 
+    Supports two modes:
+    1. Bot mode (default): Connects to an external WebSocket voice bot.
+    2. Pipeline mode: Uses the built-in STT→LLM→TTS AI pipeline.
+
     Examples:
-        # Programmatic
+        # Programmatic (bot mode)
         config = BridgeConfig(
             provider=ProviderConfig(type="twilio"),
             bot=BotConfig(url="ws://localhost:9000/ws"),
         )
 
-        # From dict
-        config = BridgeConfig(**config_dict)
+        # Programmatic (pipeline mode)
+        config = BridgeConfig(
+            provider=ProviderConfig(type="twilio"),
+            pipeline=PipelineModeConfig(
+                enabled=True,
+                stt=PipelineProviderConfig(provider="deepgram", config={"api_key": "..."}),
+                llm=PipelineProviderConfig(provider="openai", config={"api_key": "..."}),
+                tts=PipelineProviderConfig(provider="elevenlabs", config={"api_key": "..."}),
+                system_prompt="You are a customer service agent...",
+            ),
+        )
 
         # From YAML
         config = BridgeConfig.from_yaml("bridge.yaml")
@@ -87,6 +145,12 @@ class BridgeConfig(BaseModel):
     audio: AudioConfig = Field(default_factory=AudioConfig)
     saas: SaaSConfig = Field(default_factory=SaaSConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    pipeline: PipelineModeConfig = Field(default_factory=PipelineModeConfig)
+
+    @property
+    def pipeline_mode(self) -> bool:
+        """Whether the bridge is using the built-in AI pipeline."""
+        return self.pipeline.enabled
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> BridgeConfig:
@@ -185,4 +249,25 @@ audio:
 
 logging:
   level: INFO
+
+# AI Pipeline Mode (alternative to external bot WebSocket)
+# When enabled, uses built-in STT→LLM→TTS pipeline instead of bot.url
+# pipeline:
+#   enabled: true
+#   stt:
+#     provider: deepgram
+#     config:
+#       api_key: ${DEEPGRAM_API_KEY}
+#   llm:
+#     provider: openai         # openai | anthropic
+#     config:
+#       api_key: ${OPENAI_API_KEY}
+#       model: gpt-4o-mini
+#   tts:
+#     provider: elevenlabs
+#     config:
+#       api_key: ${ELEVENLABS_API_KEY}
+#       voice_id: 21m00Tcm4TlvDq8ikWAM
+#   system_prompt: "You are a helpful AI assistant..."
+#   first_message: "Hello! How can I help you today?"
 """
