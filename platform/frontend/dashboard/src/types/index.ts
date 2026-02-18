@@ -177,3 +177,37 @@ export interface CallsListResponse {
   limit: number;
   offset: number;
 }
+
+// ── Phone Numbers ────────────────────────────────────────────────
+
+export type PhoneNumberStatus = 'active' | 'released' | 'pending';
+
+export interface PhoneNumber {
+  id: string;
+  phone_number: string;
+  provider: string;
+  country: string;
+  capabilities: string[];
+  status: PhoneNumberStatus;
+  agent_id: string | null;
+  agent_name: string;
+  created_at: string;
+}
+
+export interface PhoneNumberSearchResult {
+  phone_number: string;
+  friendly_name: string;
+  country: string;
+  region: string;
+  capabilities: string[];
+  monthly_cost_cents: number;
+}
+
+export interface OutboundCallResponse {
+  call_id: string;
+  status: CallStatusType;
+  from_number: string;
+  to_number: string;
+  agent_id: string;
+  agent_name: string;
+}

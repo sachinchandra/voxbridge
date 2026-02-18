@@ -685,3 +685,78 @@ def assign_phone_number(phone_id: str, customer_id: str, agent_id: str | None) -
     if result.data:
         return PhoneNumber(**result.data[0])
     return None
+
+
+def get_phone_number(phone_id: str, customer_id: str) -> PhoneNumber | None:
+    """Get a single phone number by ID, scoped to customer."""
+    client = get_client()
+    result = (
+        client.table("phone_numbers")
+        .select("*")
+        .eq("id", phone_id)
+        .eq("customer_id", customer_id)
+        .execute()
+    )
+    if result.data:
+        return PhoneNumber(**result.data[0])
+    return None
+
+
+def get_phone_number_by_number(phone_number: str) -> PhoneNumber | None:
+    """Look up a phone number record by E.164 number (for inbound routing)."""
+    client = get_client()
+    result = (
+        client.table("phone_numbers")
+        .select("*")
+        .eq("phone_number", phone_number)
+        .eq("status", "active")
+        .execute()
+    )
+    if result.data:
+        return PhoneNumber(**result.data[0])
+    return None
+
+
+def release_phone_number(phone_id: str, customer_id: str) -> bool:
+    """Mark a phone number as released."""
+    client = get_client()
+    result = (
+        client.table("phone_numbers")
+        .update({"status": "released", "agent_id": None})
+        .eq("id", phone_id)
+        .eq("customer_id", customer_id)
+        .execute()
+    )
+    return len(result.data) > 0
+
+
+def count_phone_numbers(customer_id: str) -> int:
+    """Count active phone numbers for a customer."""
+    client = get_client()
+    result = (
+        client.table("phone_numbers")
+        .select("id", count="exact")
+        .eq("customer_id", customer_id)
+        .eq("status", "active")
+        .execute()
+    )
+    return result.count or 0
+
+
+# ──────────────────────────────────────────────────────────────────
+# Cost calculation
+# ──────────────────────────────────────────────────────────────────
+
+def calculate_call_cost(duration_seconds: float, cost_per_minute_cents: int = 6) -> int:
+    """Calculate call cost in cents based on duration.
+
+    Args:
+        duration_seconds: Call duration in seconds.
+        cost_per_minute_cents: Cost per minute in cents (default: 6 = $0.06/min).
+
+    Returns:
+        Cost in cents (rounded up to nearest cent).
+    """
+    minutes = duration_seconds / 60.0
+    cost = minutes * cost_per_minute_cents
+    return max(1, int(cost + 0.5))  # minimum 1 cent, round half up

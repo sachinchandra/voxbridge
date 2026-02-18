@@ -1,14 +1,15 @@
 """Call management API routes.
 
-Provides call history, call detail with transcript, and call search.
-Calls are created by the platform pipeline (not directly by users),
-but users view and search them via these endpoints.
+Provides call history, call detail with transcript, call search,
+and outbound call initiation via Twilio.
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from loguru import logger
 
+from app.config import settings
 from app.middleware.auth import get_current_customer
 from app.models.database import (
     CallDetailResponse,
@@ -16,12 +17,17 @@ from app.models.database import (
     CallResponse,
     CallStatus,
     Customer,
+    OutboundCallRequest,
+    OutboundCallResponse,
 )
 from app.services.database import (
+    create_call,
     get_agent,
     get_call,
+    get_phone_number,
     get_tool_calls_for_call,
     list_calls,
+    list_phone_numbers,
 )
 
 router = APIRouter(prefix="/calls", tags=["Calls"])
@@ -202,3 +208,127 @@ async def get_calls_overview(
         "total_cost_cents": total_cost,
         "total_cost_dollars": round(total_cost / 100, 2),
     }
+
+
+# ──────────────────────────────────────────────────────────────────
+# Outbound Call
+# ──────────────────────────────────────────────────────────────────
+
+@router.post("", response_model=OutboundCallResponse, status_code=status.HTTP_201_CREATED)
+async def initiate_outbound_call(
+    body: OutboundCallRequest,
+    customer: Customer = Depends(get_current_customer),
+):
+    """Initiate an outbound call to a phone number.
+
+    Flow:
+    1. Validate agent exists and is active
+    2. Select a "from" phone number (explicit or first available)
+    3. Create a call record
+    4. Initiate the call via Twilio
+    5. Return call details
+    """
+    # 1. Validate agent
+    agent = get_agent(body.agent_id, customer.id)
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent not found",
+        )
+    if agent.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Agent is not active (status: {agent.status}). Activate the agent before making calls.",
+        )
+
+    # 2. Select "from" phone number
+    from_phone = None
+    if body.from_number_id:
+        from_phone = get_phone_number(body.from_number_id, customer.id)
+        if not from_phone:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="From phone number not found",
+            )
+    else:
+        # Use the first phone number assigned to this agent, or any available
+        phones = list_phone_numbers(customer.id)
+        agent_phones = [p for p in phones if p.agent_id == body.agent_id]
+        if agent_phones:
+            from_phone = agent_phones[0]
+        elif phones:
+            from_phone = phones[0]
+
+    if not from_phone:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No phone number available. Buy a phone number first.",
+        )
+
+    # 3. Create call record
+    call = create_call({
+        "customer_id": customer.id,
+        "agent_id": agent.id,
+        "phone_number_id": from_phone.id,
+        "direction": "outbound",
+        "from_number": from_phone.phone_number,
+        "to_number": body.to,
+        "status": "initiated",
+        "metadata": body.metadata,
+    })
+
+    # 4. Initiate via Twilio
+    try:
+        from twilio.rest import Client as TwilioClient
+
+        twilio = TwilioClient(settings.twilio_account_sid, settings.twilio_auth_token)
+
+        # WebSocket URL for the AI pipeline to handle the call
+        ws_base = settings.twilio_webhook_base_url.replace("https://", "wss://").replace("http://", "ws://")
+        stream_url = f"{ws_base}/api/v1/ws/call/{call.id}"
+
+        twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Connect>
+        <Stream url="{stream_url}">
+            <Parameter name="call_id" value="{call.id}" />
+            <Parameter name="agent_id" value="{agent.id}" />
+            <Parameter name="customer_id" value="{customer.id}" />
+            <Parameter name="direction" value="outbound" />
+        </Stream>
+    </Connect>
+</Response>"""
+
+        status_url = f"{settings.twilio_webhook_base_url}/api/v1/webhooks/twilio/status"
+
+        twilio_call = twilio.calls.create(
+            twiml=twiml,
+            to=body.to,
+            from_=from_phone.phone_number,
+            status_callback=status_url,
+            status_callback_event=["initiated", "ringing", "answered", "completed"],
+            status_callback_method="POST",
+        )
+
+        logger.info(
+            f"Outbound call initiated: {call.id} | Twilio SID: {twilio_call.sid} | "
+            f"From: {from_phone.phone_number} → To: {body.to}"
+        )
+
+    except ImportError:
+        logger.warning("Twilio SDK not installed, outbound call simulated")
+    except Exception as e:
+        logger.error(f"Twilio outbound call error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to initiate call: {str(e)}",
+        )
+
+    return OutboundCallResponse(
+        call_id=call.id,
+        status=call.status,
+        from_number=from_phone.phone_number,
+        to_number=body.to,
+        agent_id=agent.id,
+        agent_name=agent.name,
+    )

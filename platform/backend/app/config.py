@@ -31,6 +31,21 @@ class Settings(BaseSettings):
     stripe_price_pro: str = ""
     stripe_price_enterprise: str = ""
 
+    # Twilio
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_webhook_base_url: str = ""  # e.g., https://api.voxbridge.io
+
+    # AI Provider keys (used for platform-managed calls)
+    deepgram_api_key: str = ""
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    elevenlabs_api_key: str = ""
+
+    # Cost calculation (cents per minute)
+    cost_per_minute_cents: int = 6  # $0.06/min
+    twilio_cost_per_minute_cents: int = 1  # ~$0.01/min telephony
+
     # Plan limits (minutes per month)
     free_plan_minutes: int = 100
     pro_plan_minutes: int = 5000

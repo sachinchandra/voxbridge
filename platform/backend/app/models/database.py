@@ -443,3 +443,85 @@ class CallListParams(BaseModel):
     search: str | None = None  # keyword search in transcript
     limit: int = 50
     offset: int = 0
+
+
+# ──────────────────────────────────────────────────────────────────
+# Phone Number API Schemas
+# ──────────────────────────────────────────────────────────────────
+
+class PhoneNumberSearchRequest(BaseModel):
+    """Search for available phone numbers."""
+    country: str = "US"
+    area_code: str | None = None
+    contains: str | None = None  # number pattern search
+    limit: int = 10
+
+
+class PhoneNumberSearchResult(BaseModel):
+    """A single available phone number from search results."""
+    phone_number: str
+    friendly_name: str = ""
+    country: str = "US"
+    region: str = ""
+    capabilities: list[str] = Field(default_factory=lambda: ["voice"])
+    monthly_cost_cents: int = 100  # ~$1/month
+
+
+class PhoneNumberBuyRequest(BaseModel):
+    """Buy a phone number and optionally assign to an agent."""
+    phone_number: str  # E.164 format
+    agent_id: str | None = None
+
+
+class PhoneNumberResponse(BaseModel):
+    """Phone number data returned by the API."""
+    id: str
+    phone_number: str
+    provider: str
+    country: str
+    capabilities: list[str]
+    status: PhoneNumberStatus
+    agent_id: str | None
+    agent_name: str = ""
+    created_at: datetime
+
+
+class PhoneNumberUpdate(BaseModel):
+    """Update a phone number (reassign agent)."""
+    agent_id: str | None = None
+
+
+# ──────────────────────────────────────────────────────────────────
+# Outbound Call API Schemas
+# ──────────────────────────────────────────────────────────────────
+
+class OutboundCallRequest(BaseModel):
+    """Request to initiate an outbound call."""
+    agent_id: str
+    to: str  # E.164 phone number
+    from_number_id: str | None = None  # specific phone number to call from
+    metadata: dict = Field(default_factory=dict)
+
+
+class OutboundCallResponse(BaseModel):
+    """Response after initiating an outbound call."""
+    call_id: str
+    status: CallStatus
+    from_number: str
+    to_number: str
+    agent_id: str
+    agent_name: str = ""
+
+
+# ──────────────────────────────────────────────────────────────────
+# Webhook Schemas
+# ──────────────────────────────────────────────────────────────────
+
+class InboundCallWebhook(BaseModel):
+    """Data from inbound call webhook (Twilio format)."""
+    CallSid: str = ""
+    From: str = ""
+    To: str = ""
+    Direction: str = "inbound"
+    CallStatus: str = ""
+    AccountSid: str = ""

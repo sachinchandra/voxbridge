@@ -3,6 +3,7 @@ import {
   AuthResponse, ApiKey, UsageSummary, UsageRecord, Plan,
   Agent, AgentListItem, AgentStats, AgentCreatePayload,
   CallDetail, CallsListResponse, CallsOverview,
+  PhoneNumber, PhoneNumberSearchResult, OutboundCallResponse,
 } from '../types';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -164,6 +165,54 @@ export const callsApi = {
   getOverview: async (): Promise<CallsOverview> => {
     const { data } = await api.get('/calls/summary/overview');
     return data;
+  },
+
+  initiateOutbound: async (payload: {
+    agent_id: string;
+    to: string;
+    from_number_id?: string;
+    metadata?: Record<string, any>;
+  }): Promise<OutboundCallResponse> => {
+    const { data } = await api.post('/calls', payload);
+    return data;
+  },
+};
+
+// ── Phone Numbers ────────────────────────────────────────────────
+
+export const phoneNumbersApi = {
+  list: async (): Promise<PhoneNumber[]> => {
+    const { data } = await api.get('/phone-numbers');
+    return data;
+  },
+
+  get: async (phoneId: string): Promise<PhoneNumber> => {
+    const { data } = await api.get(`/phone-numbers/${phoneId}`);
+    return data;
+  },
+
+  search: async (params?: {
+    country?: string;
+    area_code?: string;
+    contains?: string;
+    limit?: number;
+  }): Promise<PhoneNumberSearchResult[]> => {
+    const { data } = await api.post('/phone-numbers/search', params || {});
+    return data;
+  },
+
+  buy: async (phone_number: string, agent_id?: string): Promise<PhoneNumber> => {
+    const { data } = await api.post('/phone-numbers/buy', { phone_number, agent_id });
+    return data;
+  },
+
+  update: async (phoneId: string, agent_id: string | null): Promise<PhoneNumber> => {
+    const { data } = await api.patch(`/phone-numbers/${phoneId}`, { agent_id });
+    return data;
+  },
+
+  release: async (phoneId: string): Promise<void> => {
+    await api.delete(`/phone-numbers/${phoneId}`);
   },
 };
 

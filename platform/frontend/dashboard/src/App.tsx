@@ -13,6 +13,7 @@ import Analytics from './pages/Analytics';
 import ApiKeys from './pages/ApiKeys';
 import Usage from './pages/Usage';
 import Billing from './pages/Billing';
+import PhoneNumbers from './pages/PhoneNumbers';
 import QuickStart from './pages/QuickStart';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -70,6 +71,7 @@ function App() {
             <Route path="agents/:agentId" element={<AgentEditor />} />
             <Route path="calls" element={<Calls />} />
             <Route path="calls/:callId" element={<CallDetail />} />
+            <Route path="phone-numbers" element={<PhoneNumbers />} />
             <Route path="analytics" element={<Analytics />} />
             <Route path="quickstart" element={<QuickStart />} />
             <Route path="keys" element={<ApiKeys />} />
