@@ -4,6 +4,7 @@ import {
   Agent, AgentListItem, AgentStats, AgentCreatePayload,
   CallDetail, CallsListResponse, CallsOverview,
   PhoneNumber, PhoneNumberSearchResult, OutboundCallResponse,
+  KnowledgeBase, KBDocument,
 } from '../types';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -213,6 +214,52 @@ export const phoneNumbersApi = {
 
   release: async (phoneId: string): Promise<void> => {
     await api.delete(`/phone-numbers/${phoneId}`);
+  },
+};
+
+// ── Knowledge Bases ──────────────────────────────────────────────
+
+export const knowledgeBasesApi = {
+  list: async (): Promise<KnowledgeBase[]> => {
+    const { data } = await api.get('/knowledge-bases');
+    return data;
+  },
+
+  get: async (kbId: string): Promise<KnowledgeBase> => {
+    const { data } = await api.get(`/knowledge-bases/${kbId}`);
+    return data;
+  },
+
+  create: async (payload: { name: string; description?: string }): Promise<KnowledgeBase> => {
+    const { data } = await api.post('/knowledge-bases', payload);
+    return data;
+  },
+
+  update: async (kbId: string, payload: Partial<KnowledgeBase>): Promise<KnowledgeBase> => {
+    const { data } = await api.patch(`/knowledge-bases/${kbId}`, payload);
+    return data;
+  },
+
+  delete: async (kbId: string): Promise<void> => {
+    await api.delete(`/knowledge-bases/${kbId}`);
+  },
+
+  listDocuments: async (kbId: string): Promise<KBDocument[]> => {
+    const { data } = await api.get(`/knowledge-bases/${kbId}/documents`);
+    return data;
+  },
+
+  uploadDocument: async (kbId: string, file: File): Promise<{ id: string; filename: string; status: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const { data } = await api.post(`/knowledge-bases/${kbId}/documents`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
+
+  deleteDocument: async (kbId: string, docId: string): Promise<void> => {
+    await api.delete(`/knowledge-bases/${kbId}/documents/${docId}`);
   },
 };
 

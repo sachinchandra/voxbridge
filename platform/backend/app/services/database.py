@@ -20,6 +20,10 @@ from app.models.database import (
     Call,
     CallStatus,
     Customer,
+    Document,
+    DocumentChunk,
+    DocumentStatus,
+    KnowledgeBase,
     PhoneNumber,
     PlanTier,
     Subscription,
@@ -760,3 +764,232 @@ def calculate_call_cost(duration_seconds: float, cost_per_minute_cents: int = 6)
     minutes = duration_seconds / 60.0
     cost = minutes * cost_per_minute_cents
     return max(1, int(cost + 0.5))  # minimum 1 cent, round half up
+
+
+# ──────────────────────────────────────────────────────────────────
+# Knowledge Base operations
+# ──────────────────────────────────────────────────────────────────
+
+def create_knowledge_base(customer_id: str, data: dict) -> KnowledgeBase:
+    """Create a knowledge base."""
+    client = get_client()
+    kb = KnowledgeBase(customer_id=customer_id, **data)
+    row = kb.model_dump()
+    row["created_at"] = row["created_at"].isoformat()
+    row["updated_at"] = row["updated_at"].isoformat()
+    result = client.table("knowledge_bases").insert(row).execute()
+    return KnowledgeBase(**result.data[0])
+
+
+def list_knowledge_bases(customer_id: str) -> list[KnowledgeBase]:
+    """List all knowledge bases for a customer."""
+    client = get_client()
+    result = (
+        client.table("knowledge_bases")
+        .select("*")
+        .eq("customer_id", customer_id)
+        .eq("status", "active")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return [KnowledgeBase(**row) for row in result.data]
+
+
+def get_knowledge_base(kb_id: str, customer_id: str) -> KnowledgeBase | None:
+    """Get a knowledge base by ID, scoped to customer."""
+    client = get_client()
+    result = (
+        client.table("knowledge_bases")
+        .select("*")
+        .eq("id", kb_id)
+        .eq("customer_id", customer_id)
+        .execute()
+    )
+    if result.data:
+        return KnowledgeBase(**result.data[0])
+    return None
+
+
+def update_knowledge_base(kb_id: str, customer_id: str, data: dict) -> KnowledgeBase | None:
+    """Update a knowledge base."""
+    client = get_client()
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    result = (
+        client.table("knowledge_bases")
+        .update(data)
+        .eq("id", kb_id)
+        .eq("customer_id", customer_id)
+        .execute()
+    )
+    if result.data:
+        return KnowledgeBase(**result.data[0])
+    return None
+
+
+def delete_knowledge_base(kb_id: str, customer_id: str) -> bool:
+    """Soft-delete a knowledge base."""
+    client = get_client()
+    result = (
+        client.table("knowledge_bases")
+        .update({"status": "deleted"})
+        .eq("id", kb_id)
+        .eq("customer_id", customer_id)
+        .execute()
+    )
+    return len(result.data) > 0
+
+
+# ──────────────────────────────────────────────────────────────────
+# Document operations
+# ──────────────────────────────────────────────────────────────────
+
+def create_document(data: dict) -> Document:
+    """Create a document record."""
+    client = get_client()
+    doc = Document(**data)
+    row = doc.model_dump()
+    row["created_at"] = row["created_at"].isoformat()
+    result = client.table("documents").insert(row).execute()
+    return Document(**result.data[0])
+
+
+def list_documents(kb_id: str, customer_id: str) -> list[Document]:
+    """List all documents in a knowledge base."""
+    client = get_client()
+    result = (
+        client.table("documents")
+        .select("*")
+        .eq("knowledge_base_id", kb_id)
+        .eq("customer_id", customer_id)
+        .neq("status", "deleted")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return [Document(**row) for row in result.data]
+
+
+def get_document(doc_id: str, customer_id: str) -> Document | None:
+    """Get a document by ID."""
+    client = get_client()
+    result = (
+        client.table("documents")
+        .select("*")
+        .eq("id", doc_id)
+        .eq("customer_id", customer_id)
+        .execute()
+    )
+    if result.data:
+        return Document(**result.data[0])
+    return None
+
+
+def update_document_status(
+    doc_id: str, status: str, chunk_count: int = 0, error_message: str = ""
+) -> None:
+    """Update document processing status."""
+    client = get_client()
+    update_data: dict = {"status": status}
+    if chunk_count:
+        update_data["chunk_count"] = chunk_count
+    if error_message:
+        update_data["error_message"] = error_message
+    client.table("documents").update(update_data).eq("id", doc_id).execute()
+
+
+def delete_document(doc_id: str, customer_id: str) -> bool:
+    """Delete a document and its chunks."""
+    client = get_client()
+    # Delete chunks first
+    client.table("document_chunks").delete().eq("document_id", doc_id).execute()
+    # Delete document
+    result = (
+        client.table("documents")
+        .delete()
+        .eq("id", doc_id)
+        .eq("customer_id", customer_id)
+        .execute()
+    )
+    return len(result.data) > 0
+
+
+# ──────────────────────────────────────────────────────────────────
+# Document Chunk operations
+# ──────────────────────────────────────────────────────────────────
+
+def store_document_chunks(chunks: list[dict]) -> int:
+    """Bulk-store document chunks with embeddings."""
+    if not chunks:
+        return 0
+    client = get_client()
+    # Store in batches of 100
+    stored = 0
+    for i in range(0, len(chunks), 100):
+        batch = chunks[i:i + 100]
+        for chunk in batch:
+            chunk["created_at"] = datetime.now(timezone.utc).isoformat()
+        client.table("document_chunks").insert(batch).execute()
+        stored += len(batch)
+    return stored
+
+
+def vector_search(
+    kb_id: str,
+    query_embedding: list[float],
+    limit: int = 5,
+    similarity_threshold: float = 0.7,
+) -> list[dict]:
+    """Search for similar document chunks using vector similarity.
+
+    Uses Supabase's pgvector extension for cosine similarity search.
+
+    Args:
+        kb_id: Knowledge base ID to search in.
+        query_embedding: The embedding vector for the search query.
+        limit: Max results to return.
+        similarity_threshold: Minimum similarity score (0-1).
+
+    Returns:
+        List of matching chunks with similarity scores.
+    """
+    client = get_client()
+    # Use Supabase RPC for vector similarity search
+    result = client.rpc(
+        "match_document_chunks",
+        {
+            "query_embedding": query_embedding,
+            "match_knowledge_base_id": kb_id,
+            "match_threshold": similarity_threshold,
+            "match_count": limit,
+        },
+    ).execute()
+    return result.data or []
+
+
+def update_knowledge_base_counts(kb_id: str) -> None:
+    """Update document and chunk counts on a knowledge base."""
+    client = get_client()
+    # Count documents
+    doc_result = (
+        client.table("documents")
+        .select("id", count="exact")
+        .eq("knowledge_base_id", kb_id)
+        .eq("status", "ready")
+        .execute()
+    )
+    doc_count = doc_result.count or 0
+
+    # Count chunks
+    chunk_result = (
+        client.table("document_chunks")
+        .select("id", count="exact")
+        .eq("knowledge_base_id", kb_id)
+        .execute()
+    )
+    chunk_count = chunk_result.count or 0
+
+    # Update KB
+    client.table("knowledge_bases").update({
+        "document_count": doc_count,
+        "total_chunks": chunk_count,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", kb_id).execute()

@@ -211,3 +211,45 @@ export interface OutboundCallResponse {
   agent_id: string;
   agent_name: string;
 }
+
+// ── Knowledge Base ───────────────────────────────────────────────
+
+export type DocumentStatus = 'processing' | 'ready' | 'failed';
+
+export interface KnowledgeBase {
+  id: string;
+  name: string;
+  description: string;
+  embedding_model: string;
+  chunk_size: number;
+  chunk_overlap: number;
+  document_count: number;
+  total_chunks: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KBDocument {
+  id: string;
+  knowledge_base_id: string;
+  filename: string;
+  content_type: string;
+  source_url: string;
+  file_size_bytes: number;
+  chunk_count: number;
+  status: DocumentStatus;
+  error_message: string;
+  created_at: string;
+}
+
+// ── Agent Tools ──────────────────────────────────────────────────
+
+export interface AgentTool {
+  name: string;
+  description: string;
+  parameters: Record<string, any>;
+  endpoint: string;
+  method: string;
+  headers?: Record<string, string>;
+}

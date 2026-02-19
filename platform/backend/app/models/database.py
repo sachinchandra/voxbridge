@@ -525,3 +525,120 @@ class InboundCallWebhook(BaseModel):
     Direction: str = "inbound"
     CallStatus: str = ""
     AccountSid: str = ""
+
+
+# ──────────────────────────────────────────────────────────────────
+# Knowledge Base Models + Schemas
+# ──────────────────────────────────────────────────────────────────
+
+class DocumentStatus(str, Enum):
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class KnowledgeBase(BaseModel):
+    """A knowledge base for RAG — a collection of documents."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_id: str
+    name: str = "New Knowledge Base"
+    description: str = ""
+    embedding_model: str = "text-embedding-3-small"
+    chunk_size: int = 512
+    chunk_overlap: int = 50
+    document_count: int = 0
+    total_chunks: int = 0
+    status: str = "active"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class Document(BaseModel):
+    """A document within a knowledge base."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    knowledge_base_id: str
+    customer_id: str
+    filename: str = ""
+    content_type: str = ""  # text/plain, application/pdf, etc.
+    source_url: str = ""
+    file_size_bytes: int = 0
+    chunk_count: int = 0
+    status: DocumentStatus = DocumentStatus.PROCESSING
+    error_message: str = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class DocumentChunk(BaseModel):
+    """An embedded chunk of a document for vector search."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    document_id: str
+    knowledge_base_id: str
+    chunk_index: int = 0
+    content: str = ""
+    embedding: list[float] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)  # page, section, etc.
+    token_count: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# KB API Schemas
+
+class KnowledgeBaseCreate(BaseModel):
+    """Create a knowledge base."""
+    name: str = "New Knowledge Base"
+    description: str = ""
+    embedding_model: str = "text-embedding-3-small"
+    chunk_size: int = 512
+    chunk_overlap: int = 50
+
+
+class KnowledgeBaseUpdate(BaseModel):
+    """Update a knowledge base."""
+    name: str | None = None
+    description: str | None = None
+
+
+class KnowledgeBaseResponse(BaseModel):
+    """Knowledge base API response."""
+    id: str
+    name: str
+    description: str
+    embedding_model: str
+    chunk_size: int
+    chunk_overlap: int
+    document_count: int
+    total_chunks: int
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class DocumentResponse(BaseModel):
+    """Document API response."""
+    id: str
+    knowledge_base_id: str
+    filename: str
+    content_type: str
+    source_url: str
+    file_size_bytes: int
+    chunk_count: int
+    status: DocumentStatus
+    error_message: str
+    created_at: datetime
+
+
+class DocumentUploadResponse(BaseModel):
+    """Response after uploading a document."""
+    id: str
+    filename: str
+    status: DocumentStatus
+    message: str = "Document queued for processing"
+
+
+class VectorSearchResult(BaseModel):
+    """A single vector search result."""
+    chunk_id: str
+    document_id: str
+    content: str
+    similarity: float
+    metadata: dict = Field(default_factory=dict)
