@@ -18,6 +18,7 @@ from app.models.database import (
     ApiKey,
     ApiKeyStatus,
     Call,
+    CallQAScore,
     CallStatus,
     Customer,
     Document,
@@ -993,3 +994,261 @@ def update_knowledge_base_counts(kb_id: str) -> None:
         "total_chunks": chunk_count,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }).eq("id", kb_id).execute()
+
+
+# ──────────────────────────────────────────────────────────────────
+# QA Score operations
+# ──────────────────────────────────────────────────────────────────
+
+def create_qa_score(data: dict) -> CallQAScore:
+    """Create a QA score for a call."""
+    client = get_client()
+    score = CallQAScore(**data)
+    row = score.model_dump()
+    row["created_at"] = row["created_at"].isoformat()
+    client.table("call_qa_scores").insert(row).execute()
+    return score
+
+
+def get_qa_score_for_call(call_id: str) -> CallQAScore | None:
+    """Get the QA score for a specific call."""
+    client = get_client()
+    result = (
+        client.table("call_qa_scores")
+        .select("*")
+        .eq("call_id", call_id)
+        .limit(1)
+        .execute()
+    )
+    if result.data:
+        return CallQAScore(**result.data[0])
+    return None
+
+
+def list_qa_scores(
+    customer_id: str,
+    agent_id: str | None = None,
+    flagged_only: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[CallQAScore], int]:
+    """List QA scores with optional filters."""
+    client = get_client()
+    query = (
+        client.table("call_qa_scores")
+        .select("*", count="exact")
+        .eq("customer_id", customer_id)
+    )
+    if agent_id:
+        query = query.eq("agent_id", agent_id)
+    if flagged_only:
+        query = query.eq("flagged", True)
+    result = query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
+    scores = [CallQAScore(**row) for row in (result.data or [])]
+    return scores, result.count or 0
+
+
+def get_qa_summary(customer_id: str, agent_id: str | None = None) -> dict:
+    """Get QA summary statistics."""
+    client = get_client()
+    query = (
+        client.table("call_qa_scores")
+        .select("*")
+        .eq("customer_id", customer_id)
+    )
+    if agent_id:
+        query = query.eq("agent_id", agent_id)
+    result = query.order("created_at", desc=True).limit(1000).execute()
+    scores = result.data or []
+
+    if not scores:
+        return {
+            "total_scored": 0,
+            "avg_overall": 0.0,
+            "avg_accuracy": 0.0,
+            "avg_tone": 0.0,
+            "avg_resolution": 0.0,
+            "avg_compliance": 0.0,
+            "flagged_count": 0,
+            "pii_count": 0,
+            "angry_count": 0,
+            "score_distribution": [],
+            "top_flag_reasons": [],
+        }
+
+    total = len(scores)
+    avg_overall = sum(s["overall_score"] for s in scores) / total
+    avg_accuracy = sum(s["accuracy_score"] for s in scores) / total
+    avg_tone = sum(s["tone_score"] for s in scores) / total
+    avg_resolution = sum(s["resolution_score"] for s in scores) / total
+    avg_compliance = sum(s["compliance_score"] for s in scores) / total
+    flagged_count = sum(1 for s in scores if s.get("flagged"))
+    pii_count = sum(1 for s in scores if s.get("pii_detected"))
+    angry_count = sum(1 for s in scores if s.get("angry_caller"))
+
+    # Score distribution (0-20, 21-40, 41-60, 61-80, 81-100)
+    buckets = {"0-20": 0, "21-40": 0, "41-60": 0, "61-80": 0, "81-100": 0}
+    for s in scores:
+        score = s["overall_score"]
+        if score <= 20:
+            buckets["0-20"] += 1
+        elif score <= 40:
+            buckets["21-40"] += 1
+        elif score <= 60:
+            buckets["41-60"] += 1
+        elif score <= 80:
+            buckets["61-80"] += 1
+        else:
+            buckets["81-100"] += 1
+    score_distribution = [{"range": k, "count": v} for k, v in buckets.items()]
+
+    # Top flag reasons
+    reason_counts: dict[str, int] = {}
+    for s in scores:
+        for reason in s.get("flag_reasons", []):
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    top_flag_reasons = sorted(
+        [{"reason": k, "count": v} for k, v in reason_counts.items()],
+        key=lambda x: x["count"],
+        reverse=True,
+    )[:10]
+
+    return {
+        "total_scored": total,
+        "avg_overall": round(avg_overall, 1),
+        "avg_accuracy": round(avg_accuracy, 1),
+        "avg_tone": round(avg_tone, 1),
+        "avg_resolution": round(avg_resolution, 1),
+        "avg_compliance": round(avg_compliance, 1),
+        "flagged_count": flagged_count,
+        "pii_count": pii_count,
+        "angry_count": angry_count,
+        "score_distribution": score_distribution,
+        "top_flag_reasons": top_flag_reasons,
+    }
+
+
+def get_enhanced_analytics(customer_id: str) -> dict:
+    """Get enhanced analytics with sentiment, peak hours, escalation reasons."""
+    client = get_client()
+
+    # Get current billing period
+    now = datetime.now(timezone.utc)
+    period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    # Get all calls this period
+    result = (
+        client.table("calls")
+        .select("*")
+        .eq("customer_id", customer_id)
+        .gte("created_at", period_start.isoformat())
+        .order("created_at", desc=True)
+        .limit(10000)
+        .execute()
+    )
+    calls = result.data or []
+
+    if not calls:
+        return {
+            "total_calls": 0, "ai_handled": 0, "escalated": 0,
+            "containment_rate": 0.0, "avg_duration_seconds": 0.0,
+            "total_cost_cents": 0, "total_cost_dollars": 0.0,
+            "sentiment_positive": 0, "sentiment_neutral": 0, "sentiment_negative": 0,
+            "calls_by_hour": [{"hour": h, "calls": 0} for h in range(24)],
+            "escalation_reasons": [], "resolved": 0, "abandoned": 0,
+            "calls_by_day": [], "agent_rankings": [],
+        }
+
+    total = len(calls)
+    ai_handled = sum(1 for c in calls if not c.get("escalated_to_human"))
+    escalated = total - ai_handled
+    avg_dur = sum(c.get("duration_seconds", 0) for c in calls) / total
+    total_cost = sum(c.get("cost_cents", 0) for c in calls)
+
+    # Sentiment breakdown
+    sent_pos = sent_neg = sent_neutral = 0
+    for c in calls:
+        score = c.get("sentiment_score")
+        if score is not None:
+            if score >= 0.3:
+                sent_pos += 1
+            elif score <= -0.3:
+                sent_neg += 1
+            else:
+                sent_neutral += 1
+        else:
+            sent_neutral += 1
+
+    # Peak hours
+    hour_counts = {h: 0 for h in range(24)}
+    for c in calls:
+        try:
+            ts = c.get("started_at", "")
+            if isinstance(ts, str) and "T" in ts:
+                hour = int(ts[11:13])
+                hour_counts[hour] += 1
+        except (ValueError, IndexError):
+            pass
+    calls_by_hour = [{"hour": h, "calls": cnt} for h, cnt in sorted(hour_counts.items())]
+
+    # Escalation reasons from end_reason field
+    esc_reasons: dict[str, int] = {}
+    for c in calls:
+        if c.get("escalated_to_human"):
+            reason = c.get("end_reason", "unknown") or "unknown"
+            esc_reasons[reason] = esc_reasons.get(reason, 0) + 1
+    escalation_reasons = sorted(
+        [{"reason": k, "count": v} for k, v in esc_reasons.items()],
+        key=lambda x: x["count"], reverse=True,
+    )[:10]
+
+    # Resolution breakdown
+    resolved = sum(1 for c in calls if c.get("resolution") == "resolved")
+    abandoned = sum(1 for c in calls if c.get("resolution") == "abandoned")
+
+    # Calls by day
+    day_counts: dict[str, int] = {}
+    for c in calls:
+        day = c.get("created_at", "")[:10]
+        if day:
+            day_counts[day] = day_counts.get(day, 0) + 1
+    calls_by_day = [{"date": d, "calls": n} for d, n in sorted(day_counts.items())]
+
+    # Agent rankings
+    agent_data: dict[str, dict] = {}
+    for c in calls:
+        aid = c.get("agent_id", "")
+        if aid not in agent_data:
+            agent_data[aid] = {"agent_id": aid, "calls": 0, "ai_handled": 0, "total_duration": 0}
+        agent_data[aid]["calls"] += 1
+        if not c.get("escalated_to_human"):
+            agent_data[aid]["ai_handled"] += 1
+        agent_data[aid]["total_duration"] += c.get("duration_seconds", 0)
+
+    for aid, data in agent_data.items():
+        data["containment_rate"] = round(data["ai_handled"] / data["calls"] * 100, 1) if data["calls"] > 0 else 0
+        data["avg_duration"] = round(data["total_duration"] / data["calls"], 1) if data["calls"] > 0 else 0
+        # Get agent name
+        agent = get_agent(aid, customer_id)
+        data["agent_name"] = agent.name if agent else "Unknown"
+
+    agent_rankings = sorted(agent_data.values(), key=lambda x: x["calls"], reverse=True)[:10]
+
+    return {
+        "total_calls": total,
+        "ai_handled": ai_handled,
+        "escalated": escalated,
+        "containment_rate": round(ai_handled / total * 100, 1) if total > 0 else 0,
+        "avg_duration_seconds": round(avg_dur, 1),
+        "total_cost_cents": total_cost,
+        "total_cost_dollars": round(total_cost / 100, 2),
+        "sentiment_positive": sent_pos,
+        "sentiment_neutral": sent_neutral,
+        "sentiment_negative": sent_neg,
+        "calls_by_hour": calls_by_hour,
+        "escalation_reasons": escalation_reasons,
+        "resolved": resolved,
+        "abandoned": abandoned,
+        "calls_by_day": calls_by_day,
+        "agent_rankings": agent_rankings,
+    }

@@ -5,6 +5,7 @@ import {
   CallDetail, CallsListResponse, CallsOverview,
   PhoneNumber, PhoneNumberSearchResult, OutboundCallResponse,
   KnowledgeBase, KBDocument,
+  QAScore, QASummary, AnalyticsDetail,
 } from '../types';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -260,6 +261,45 @@ export const knowledgeBasesApi = {
 
   deleteDocument: async (kbId: string, docId: string): Promise<void> => {
     await api.delete(`/knowledge-bases/${kbId}/documents/${docId}`);
+  },
+};
+
+// ── Quality Assurance ────────────────────────────────────────────
+
+export const qaApi = {
+  scoreCall: async (callId: string): Promise<QAScore> => {
+    const { data } = await api.post(`/qa/score/${callId}`);
+    return data;
+  },
+
+  scoreBatch: async (limit?: number): Promise<{ scored: number; flagged: number; message: string }> => {
+    const { data } = await api.post('/qa/score-batch', null, { params: { limit } });
+    return data;
+  },
+
+  getCallScore: async (callId: string): Promise<QAScore> => {
+    const { data } = await api.get(`/qa/calls/${callId}`);
+    return data;
+  },
+
+  listScores: async (params?: {
+    agent_id?: string;
+    flagged?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ scores: QAScore[]; total: number }> => {
+    const { data } = await api.get('/qa/scores', { params });
+    return data;
+  },
+
+  getSummary: async (agentId?: string): Promise<QASummary> => {
+    const { data } = await api.get('/qa/summary', { params: { agent_id: agentId } });
+    return data;
+  },
+
+  getAnalytics: async (): Promise<AnalyticsDetail> => {
+    const { data } = await api.get('/qa/analytics');
+    return data;
   },
 };
 

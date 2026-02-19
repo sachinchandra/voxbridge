@@ -3,38 +3,21 @@ import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
-import { callsApi, agentsApi } from '../services/api';
-import { AgentListItem, AgentStats, CallsOverview } from '../types';
+import { qaApi } from '../services/api';
+import { AnalyticsDetail } from '../types';
 
 const COLORS = ['#7c3aed', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6'];
+const SENTIMENT_COLORS = ['#10b981', '#6b7280', '#ef4444'];
 
 export default function Analytics() {
-  const [overview, setOverview] = useState<CallsOverview | null>(null);
-  const [agents, setAgents] = useState<AgentListItem[]>([]);
-  const [agentStats, setAgentStats] = useState<Record<string, AgentStats>>({});
+  const [analytics, setAnalytics] = useState<AnalyticsDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([
-      callsApi.getOverview().catch(() => null),
-      agentsApi.list().catch(() => []),
-    ]).then(async ([o, a]) => {
-      setOverview(o);
-      setAgents(a);
-
-      // Fetch stats for each agent
-      const statsMap: Record<string, AgentStats> = {};
-      await Promise.all(
-        a.slice(0, 10).map(async (agent: AgentListItem) => {
-          try {
-            const s = await agentsApi.getStats(agent.id);
-            statsMap[agent.id] = s;
-          } catch {}
-        })
-      );
-      setAgentStats(statsMap);
-      setLoading(false);
-    });
+    qaApi.getAnalytics()
+      .then(setAnalytics)
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
   if (loading) {
@@ -45,63 +28,51 @@ export default function Analytics() {
     );
   }
 
-  // Aggregate calls by day across all agents
-  const dailyMap: Record<string, number> = {};
-  Object.values(agentStats).forEach((s) => {
-    s.calls_by_day.forEach(({ date, calls }) => {
-      dailyMap[date] = (dailyMap[date] || 0) + calls;
-    });
-  });
-  const dailyCalls = Object.entries(dailyMap)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, calls]) => ({ date, calls }));
+  if (!analytics) {
+    return <div className="text-center py-16 text-gray-400">Failed to load analytics</div>;
+  }
 
-  // Agent comparison data
-  const agentComparison = agents
-    .filter((a) => agentStats[a.id])
-    .map((a) => ({
-      name: a.name.length > 15 ? a.name.slice(0, 15) + '...' : a.name,
-      calls: agentStats[a.id].total_calls,
-      containment: agentStats[a.id].containment_rate,
-      avgDuration: Math.round(agentStats[a.id].avg_duration_seconds),
-    }));
-
-  // Direction breakdown for pie chart
-  const pieData = [
-    { name: 'AI Handled', value: overview?.ai_handled || 0 },
-    { name: 'Escalated', value: overview?.escalated || 0 },
-  ].filter((d) => d.value > 0);
-
-  // Cost savings estimate
-  const humanCostPerMin = 0.50; // avg $30/hr = $0.50/min
-  const totalMinutes = overview ? (overview.avg_duration_seconds * overview.total_calls) / 60 : 0;
+  const humanCostPerMin = 0.50;
+  const totalMinutes = analytics.total_calls > 0
+    ? (analytics.avg_duration_seconds * analytics.total_calls) / 60
+    : 0;
   const humanCost = totalMinutes * humanCostPerMin;
-  const aiCost = (overview?.total_cost_cents || 0) / 100;
+  const aiCost = analytics.total_cost_dollars;
   const savings = humanCost - aiCost;
+
+  const sentimentData = [
+    { name: 'Positive', value: analytics.sentiment_positive },
+    { name: 'Neutral', value: analytics.sentiment_neutral },
+    { name: 'Negative', value: analytics.sentiment_negative },
+  ].filter(d => d.value > 0);
+
+  const pieData = [
+    { name: 'AI Handled', value: analytics.ai_handled },
+    { name: 'Escalated', value: analytics.escalated },
+  ].filter(d => d.value > 0);
 
   return (
     <div>
       <h1 className="text-2xl font-bold text-white mb-1">Analytics</h1>
       <p className="text-gray-400 mb-8">AI contact center performance overview</p>
 
-      {/* Top-level KPIs */}
+      {/* Top KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-        <KpiCard label="Total Calls" value={String(overview?.total_calls || 0)} />
-        <KpiCard label="AI Containment" value={`${overview?.containment_rate || 0}%`} highlight={true} />
-        <KpiCard label="Avg Duration" value={`${Math.round(overview?.avg_duration_seconds || 0)}s`} />
+        <KpiCard label="Total Calls" value={String(analytics.total_calls)} />
+        <KpiCard label="AI Containment" value={`${analytics.containment_rate}%`} highlight={true} />
+        <KpiCard label="Avg Duration" value={`${Math.round(analytics.avg_duration_seconds)}s`} />
         <KpiCard label="AI Cost" value={`$${aiCost.toFixed(2)}`} />
         <KpiCard label="Est. Savings" value={`$${savings > 0 ? savings.toFixed(0) : '0'}`} highlight={savings > 0} />
       </div>
 
-      {/* Charts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        {/* Calls per day */}
+      {/* Row 1: Calls trend + AI vs Human pie */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
         <div className="lg:col-span-2 bg-[#1a1230] rounded-xl p-6 border border-vox-900/50">
           <h3 className="text-sm font-medium text-gray-300 mb-4">Calls Per Day</h3>
-          {dailyCalls.length > 0 ? (
+          {analytics.calls_by_day.length > 0 ? (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={dailyCalls}>
+                <AreaChart data={analytics.calls_by_day}>
                   <defs>
                     <linearGradient id="colorCalls" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#7c3aed" stopOpacity={0.3} />
@@ -121,7 +92,6 @@ export default function Analytics() {
           )}
         </div>
 
-        {/* AI vs Escalated pie */}
         <div className="bg-[#1a1230] rounded-xl p-6 border border-vox-900/50">
           <h3 className="text-sm font-medium text-gray-300 mb-4">AI vs Human</h3>
           {pieData.length > 0 ? (
@@ -143,25 +113,134 @@ export default function Analytics() {
         </div>
       </div>
 
-      {/* Agent comparison */}
-      {agentComparison.length > 0 && (
-        <div className="bg-[#1a1230] rounded-xl p-6 border border-vox-900/50 mb-8">
-          <h3 className="text-sm font-medium text-gray-300 mb-4">Agent Comparison — Calls</h3>
-          <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={agentComparison}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2a2040" />
-                <XAxis dataKey="name" stroke="#6b7280" fontSize={11} />
-                <YAxis stroke="#6b7280" fontSize={11} />
-                <Tooltip contentStyle={{ background: '#1a1230', border: '1px solid #3b0f7a', borderRadius: '8px', color: '#f3f0ff' }} />
-                <Bar dataKey="calls" fill="#7c3aed" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+      {/* Row 2: Sentiment + Peak Hours */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        {/* Sentiment breakdown */}
+        <div className="bg-[#1a1230] rounded-xl p-6 border border-vox-900/50">
+          <h3 className="text-sm font-medium text-gray-300 mb-4">Caller Sentiment</h3>
+          {sentimentData.length > 0 ? (
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={sentimentData} cx="50%" cy="50%" innerRadius={45} outerRadius={75} dataKey="value" label={({ name, percent }: any) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}>
+                    {sentimentData.map((_, i) => (
+                      <Cell key={i} fill={SENTIMENT_COLORS[i % SENTIMENT_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip contentStyle={{ background: '#1a1230', border: '1px solid #3b0f7a', borderRadius: '8px', color: '#f3f0ff' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="h-56 flex items-center justify-center text-gray-500 text-sm">No sentiment data</div>
+          )}
+        </div>
+
+        {/* Peak hours */}
+        <div className="bg-[#1a1230] rounded-xl p-6 border border-vox-900/50">
+          <h3 className="text-sm font-medium text-gray-300 mb-4">Calls by Hour</h3>
+          {analytics.calls_by_hour.some(h => h.calls > 0) ? (
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={analytics.calls_by_hour}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#2a2040" />
+                  <XAxis dataKey="hour" stroke="#6b7280" fontSize={10} tickFormatter={(v) => `${v}h`} />
+                  <YAxis stroke="#6b7280" fontSize={10} />
+                  <Tooltip
+                    contentStyle={{ background: '#1a1230', border: '1px solid #3b0f7a', borderRadius: '8px', color: '#f3f0ff' }}
+                    labelFormatter={(v) => `${v}:00`}
+                  />
+                  <Bar dataKey="calls" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="h-56 flex items-center justify-center text-gray-500 text-sm">No hourly data</div>
+          )}
+        </div>
+      </div>
+
+      {/* Row 3: Agent Leaderboard + Escalation Reasons */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        {/* Agent leaderboard */}
+        <div className="bg-[#1a1230] rounded-xl p-6 border border-vox-900/50">
+          <h3 className="text-sm font-medium text-gray-300 mb-4">Agent Leaderboard</h3>
+          {analytics.agent_rankings.length > 0 ? (
+            <div className="space-y-3">
+              {analytics.agent_rankings.map((agent, i) => (
+                <div key={agent.agent_id} className="flex items-center gap-3 bg-[#0f0a1e] rounded-lg p-3">
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
+                    i === 0 ? 'bg-amber-600 text-white' :
+                    i === 1 ? 'bg-gray-400 text-white' :
+                    i === 2 ? 'bg-amber-800 text-white' :
+                    'bg-gray-700 text-gray-300'
+                  }`}>
+                    {i + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-white truncate">{agent.agent_name}</p>
+                    <p className="text-xs text-gray-500">{agent.calls} calls · {agent.containment_rate}% AI</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-vox-400">{agent.containment_rate}%</p>
+                    <p className="text-xs text-gray-500">containment</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500 text-sm">No agent data yet</div>
+          )}
+        </div>
+
+        {/* Escalation reasons */}
+        <div className="bg-[#1a1230] rounded-xl p-6 border border-vox-900/50">
+          <h3 className="text-sm font-medium text-gray-300 mb-4">Escalation Reasons</h3>
+          {analytics.escalation_reasons.length > 0 ? (
+            <div className="space-y-3">
+              {analytics.escalation_reasons.map((item) => (
+                <div key={item.reason} className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm text-gray-300 capitalize">{item.reason}</span>
+                      <span className="text-xs text-gray-500">{item.count}</span>
+                    </div>
+                    <div className="h-1.5 bg-[#0f0a1e] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-red-500/60 rounded-full"
+                        style={{ width: `${Math.min(100, (item.count / (analytics.escalated || 1)) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500 text-sm">No escalations yet</div>
+          )}
+
+          {/* Resolution breakdown */}
+          <div className="mt-6 pt-4 border-t border-vox-900/30">
+            <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">Resolution Breakdown</h4>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-[#0f0a1e] rounded-lg p-3 text-center">
+                <p className="text-lg font-bold text-emerald-400">{analytics.resolved}</p>
+                <p className="text-xs text-gray-500">Resolved</p>
+              </div>
+              <div className="bg-[#0f0a1e] rounded-lg p-3 text-center">
+                <p className="text-lg font-bold text-amber-400">{analytics.escalated}</p>
+                <p className="text-xs text-gray-500">Escalated</p>
+              </div>
+              <div className="bg-[#0f0a1e] rounded-lg p-3 text-center">
+                <p className="text-lg font-bold text-red-400">{analytics.abandoned}</p>
+                <p className="text-xs text-gray-500">Abandoned</p>
+              </div>
+            </div>
           </div>
         </div>
-      )}
+      </div>
 
-      {/* Cost savings breakdown */}
+      {/* Row 4: Cost savings */}
       <div className="bg-[#1a1230] rounded-xl p-6 border border-vox-900/50">
         <h3 className="text-sm font-medium text-gray-300 mb-4">Cost Savings Estimate</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

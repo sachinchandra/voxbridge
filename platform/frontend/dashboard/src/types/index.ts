@@ -253,3 +253,62 @@ export interface AgentTool {
   method: string;
   headers?: Record<string, string>;
 }
+
+// ── QA Scores ───────────────────────────────────────────────────
+
+export interface QAScore {
+  id: string;
+  call_id: string;
+  agent_id: string;
+  accuracy_score: number;
+  tone_score: number;
+  resolution_score: number;
+  compliance_score: number;
+  overall_score: number;
+  pii_detected: boolean;
+  angry_caller: boolean;
+  flagged: boolean;
+  flag_reasons: string[];
+  summary: string;
+  improvement_suggestions: string[];
+  created_at: string;
+}
+
+export interface QASummary {
+  total_scored: number;
+  avg_overall: number;
+  avg_accuracy: number;
+  avg_tone: number;
+  avg_resolution: number;
+  avg_compliance: number;
+  flagged_count: number;
+  pii_count: number;
+  angry_count: number;
+  score_distribution: Array<{ range: string; count: number }>;
+  top_flag_reasons: Array<{ reason: string; count: number }>;
+}
+
+export interface AnalyticsDetail {
+  total_calls: number;
+  ai_handled: number;
+  escalated: number;
+  containment_rate: number;
+  avg_duration_seconds: number;
+  total_cost_cents: number;
+  total_cost_dollars: number;
+  sentiment_positive: number;
+  sentiment_neutral: number;
+  sentiment_negative: number;
+  calls_by_hour: Array<{ hour: number; calls: number }>;
+  escalation_reasons: Array<{ reason: string; count: number }>;
+  resolved: number;
+  abandoned: number;
+  calls_by_day: Array<{ date: string; calls: number }>;
+  agent_rankings: Array<{
+    agent_id: string;
+    agent_name: string;
+    calls: number;
+    containment_rate: number;
+    avg_duration: number;
+  }>;
+}

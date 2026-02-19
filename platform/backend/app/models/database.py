@@ -642,3 +642,90 @@ class VectorSearchResult(BaseModel):
     content: str
     similarity: float
     metadata: dict = Field(default_factory=dict)
+
+
+# ──────────────────────────────────────────────────────────────────
+# Quality Assurance Models
+# ──────────────────────────────────────────────────────────────────
+
+class CallQAScore(BaseModel):
+    """Automated QA score for a call."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    call_id: str
+    customer_id: str
+    agent_id: str
+    # Individual scores (0-100)
+    accuracy_score: int = 0  # Did AI provide correct information?
+    tone_score: int = 0  # Was the tone appropriate?
+    resolution_score: int = 0  # Was the issue resolved?
+    compliance_score: int = 0  # Did AI follow the script/rules?
+    overall_score: int = 0  # Weighted average
+    # Flags
+    pii_detected: bool = False  # PII exposed in transcript?
+    angry_caller: bool = False  # Caller was angry/frustrated?
+    flagged: bool = False  # Needs human review?
+    flag_reasons: list[str] = Field(default_factory=list)
+    # AI-generated summary
+    summary: str = ""
+    improvement_suggestions: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class QAScoreResponse(BaseModel):
+    """QA score API response."""
+    id: str
+    call_id: str
+    agent_id: str
+    accuracy_score: int
+    tone_score: int
+    resolution_score: int
+    compliance_score: int
+    overall_score: int
+    pii_detected: bool
+    angry_caller: bool
+    flagged: bool
+    flag_reasons: list[str]
+    summary: str
+    improvement_suggestions: list[str]
+    created_at: datetime
+
+
+class QASummary(BaseModel):
+    """QA summary for the dashboard."""
+    total_scored: int = 0
+    avg_overall: float = 0.0
+    avg_accuracy: float = 0.0
+    avg_tone: float = 0.0
+    avg_resolution: float = 0.0
+    avg_compliance: float = 0.0
+    flagged_count: int = 0
+    pii_count: int = 0
+    angry_count: int = 0
+    score_distribution: list[dict] = Field(default_factory=list)  # [{range, count}]
+    top_flag_reasons: list[dict] = Field(default_factory=list)  # [{reason, count}]
+
+
+class AnalyticsDetail(BaseModel):
+    """Enhanced analytics response with sentiment, peak hours, etc."""
+    total_calls: int = 0
+    ai_handled: int = 0
+    escalated: int = 0
+    containment_rate: float = 0.0
+    avg_duration_seconds: float = 0.0
+    total_cost_cents: int = 0
+    total_cost_dollars: float = 0.0
+    # Sentiment breakdown
+    sentiment_positive: int = 0
+    sentiment_neutral: int = 0
+    sentiment_negative: int = 0
+    # Peak hours (0-23 → call count)
+    calls_by_hour: list[dict] = Field(default_factory=list)
+    # Escalation reasons
+    escalation_reasons: list[dict] = Field(default_factory=list)
+    # Resolution breakdown
+    resolved: int = 0
+    abandoned: int = 0
+    # Calls by day (for trends)
+    calls_by_day: list[dict] = Field(default_factory=list)
+    # Agent leaderboard
+    agent_rankings: list[dict] = Field(default_factory=list)
