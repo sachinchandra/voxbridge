@@ -6,6 +6,8 @@ import {
   PhoneNumber, PhoneNumberSearchResult, OutboundCallResponse,
   KnowledgeBase, KBDocument,
   QAScore, QASummary, AnalyticsDetail,
+  PlaygroundStartResponse, PlaygroundResponse, PlaygroundSessionDetail,
+  QAReportPreview,
 } from '../types';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -301,6 +303,46 @@ export const qaApi = {
     const { data } = await api.get('/qa/analytics');
     return data;
   },
+};
+
+// ── Playground ──────────────────────────────────────────────────
+
+export const playgroundApi = {
+  start: async (agentId: string): Promise<PlaygroundStartResponse> => {
+    const { data } = await api.post('/playground/start', { agent_id: agentId });
+    return data;
+  },
+
+  sendMessage: async (sessionId: string, message: string): Promise<PlaygroundResponse> => {
+    const { data } = await api.post('/playground/message', { session_id: sessionId, message });
+    return data;
+  },
+
+  endSession: async (sessionId: string): Promise<{ session_id: string; status: string }> => {
+    const { data } = await api.post(`/playground/end/${sessionId}`);
+    return data;
+  },
+
+  getSession: async (sessionId: string): Promise<PlaygroundSessionDetail> => {
+    const { data } = await api.get(`/playground/session/${sessionId}`);
+    return data;
+  },
+
+  quickTest: async (agentId: string, message: string): Promise<PlaygroundResponse> => {
+    const { data } = await api.post('/playground/quick-test', { agent_id: agentId, message });
+    return data;
+  },
+};
+
+// ── QA Reports ──────────────────────────────────────────────────
+
+export const qaReportsApi = {
+  send: async (): Promise<QAReportPreview> => {
+    const { data } = await api.post('/qa-reports/send');
+    return data;
+  },
+
+  previewUrl: `${API_URL}/api/v1/qa-reports/preview`,
 };
 
 export default api;

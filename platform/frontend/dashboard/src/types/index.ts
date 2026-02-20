@@ -288,6 +288,64 @@ export interface QASummary {
   top_flag_reasons: Array<{ reason: string; count: number }>;
 }
 
+// ── Playground ─────────────────────────────────────────────────
+
+export interface PlaygroundMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+  timestamp: number;
+  latency_ms: number;
+  tool_call?: {
+    name: string;
+    arguments: string;
+    result?: any;
+    duration_ms?: number;
+  } | null;
+}
+
+export interface PlaygroundStartResponse {
+  session_id: string;
+  agent_name: string;
+  first_message: string;
+  llm_provider: string;
+  llm_model: string;
+}
+
+export interface PlaygroundResponse {
+  session_id: string;
+  reply: string;
+  tool_calls: Array<{ name: string; arguments: string }>;
+  done: boolean;
+  latency_ms: number;
+  tokens_used: number;
+}
+
+export interface PlaygroundSessionDetail {
+  session_id: string;
+  agent_id: string;
+  agent_name: string;
+  status: 'active' | 'completed' | 'error';
+  messages: PlaygroundMessage[];
+  total_turns: number;
+  total_tokens: number;
+  estimated_cost_cents: number;
+  started_at: string;
+  ended_at: string | null;
+}
+
+// ── QA Report ──────────────────────────────────────────────────
+
+export interface QAReportPreview {
+  sent: boolean;
+  report: {
+    period: string;
+    total_scored: number;
+    avg_score: number;
+    flagged: number;
+    trend: string;
+  };
+}
+
 export interface AnalyticsDetail {
   total_calls: number;
   ai_handled: number;

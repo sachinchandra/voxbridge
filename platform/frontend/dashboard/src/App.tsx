@@ -16,6 +16,7 @@ import Billing from './pages/Billing';
 import PhoneNumbers from './pages/PhoneNumbers';
 import KnowledgeBases from './pages/KnowledgeBases';
 import QualityAssurance from './pages/QualityAssurance';
+import Playground from './pages/Playground';
 import QuickStart from './pages/QuickStart';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -77,6 +78,7 @@ function App() {
             <Route path="knowledge-bases" element={<KnowledgeBases />} />
             <Route path="analytics" element={<Analytics />} />
             <Route path="qa" element={<QualityAssurance />} />
+            <Route path="playground" element={<Playground />} />
             <Route path="quickstart" element={<QuickStart />} />
             <Route path="keys" element={<ApiKeys />} />
             <Route path="usage" element={<Usage />} />

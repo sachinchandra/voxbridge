@@ -729,3 +729,74 @@ class AnalyticsDetail(BaseModel):
     calls_by_day: list[dict] = Field(default_factory=list)
     # Agent leaderboard
     agent_rankings: list[dict] = Field(default_factory=list)
+
+
+# ──────────────────────────────────────────────────────────────────
+# Playground models
+# ──────────────────────────────────────────────────────────────────
+
+class PlaygroundMessage(BaseModel):
+    """A single message in a playground test session."""
+    role: str = "user"  # user | assistant | system | tool
+    content: str = ""
+    timestamp: float = 0.0
+    tool_call: dict | None = None  # {name, arguments, result, duration_ms}
+    latency_ms: int = 0  # Time to generate this message
+
+
+class PlaygroundSession(BaseModel):
+    """An in-browser test conversation with an AI agent."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_id: str = ""
+    agent_id: str = ""
+    agent_name: str = ""
+    messages: list[PlaygroundMessage] = Field(default_factory=list)
+    status: str = "active"  # active | completed | error
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    ended_at: datetime | None = None
+    total_turns: int = 0
+    total_tokens: int = 0
+    estimated_cost_cents: int = 0
+    error: str = ""
+
+
+class PlaygroundRequest(BaseModel):
+    """Request to send a message in a playground session."""
+    message: str = ""
+    session_id: str | None = None  # None = start new session
+
+
+class PlaygroundResponse(BaseModel):
+    """Response from a playground turn."""
+    session_id: str
+    reply: str = ""
+    tool_calls: list[dict] = Field(default_factory=list)
+    done: bool = False
+    latency_ms: int = 0
+    tokens_used: int = 0
+
+
+# ──────────────────────────────────────────────────────────────────
+# QA Email models
+# ──────────────────────────────────────────────────────────────────
+
+class QAWeeklyReport(BaseModel):
+    """Weekly QA summary email data."""
+    customer_id: str = ""
+    customer_email: str = ""
+    customer_name: str = ""
+    period_start: str = ""
+    period_end: str = ""
+    total_calls_scored: int = 0
+    avg_overall_score: float = 0.0
+    avg_accuracy: float = 0.0
+    avg_tone: float = 0.0
+    avg_resolution: float = 0.0
+    avg_compliance: float = 0.0
+    flagged_calls: int = 0
+    pii_detections: int = 0
+    angry_callers: int = 0
+    top_issues: list[str] = Field(default_factory=list)
+    top_agents: list[dict] = Field(default_factory=list)  # [{name, score, calls}]
+    improvement_areas: list[str] = Field(default_factory=list)
+    score_trend: str = "stable"  # improving | stable | declining
