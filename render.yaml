@@ -1,0 +1,41 @@
+# Render Blueprint - Deploy VoxBridge Platform
+# https://render.com/docs/blueprint-spec
+#
+# To deploy:
+#   1. Go to https://dashboard.render.com
+#   2. New → Blueprint Instance → connect sachinchandra/voxbridge
+#   3. Or update existing voxbridge-api service to point to this repo
+#      with Root Directory = platform/backend
+
+services:
+  - type: web
+    name: voxbridge-api
+    runtime: python
+    rootDir: platform/backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.0"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_PRO
+        sync: false
+      - key: STRIPE_PRICE_ENTERPRISE
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+    healthCheckPath: /health
+    plan: free
