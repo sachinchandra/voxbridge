@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from app.models.database import ConversationFlow, FlowNode, FlowEdge
 from app.services import flow_engine as fe
-from app.services.auth import get_current_customer
+from app.middleware.auth import get_current_customer
 
 router = APIRouter(prefix="/flows", tags=["flows"])
 

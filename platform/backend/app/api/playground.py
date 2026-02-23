@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from app.models.database import PlaygroundResponse
 from app.services import database as db
 from app.services import playground as pg
-from app.services.auth import get_current_customer
+from app.middleware.auth import get_current_customer
 
 router = APIRouter(prefix="/playground", tags=["playground"])
 

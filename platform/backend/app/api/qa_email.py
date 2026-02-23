@@ -11,7 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.services import database as db
-from app.services.auth import get_current_customer
+from app.middleware.auth import get_current_customer
 from app.services.qa_email import generate_weekly_report, render_email_html, send_weekly_report
 
 router = APIRouter(prefix="/qa-reports", tags=["qa-reports"])

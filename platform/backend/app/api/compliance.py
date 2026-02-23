@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from app.models.database import AuditAction, ComplianceRule, ComplianceRuleType
 from app.services import compliance as comp_svc
-from app.services.auth import get_current_customer
+from app.middleware.auth import get_current_customer
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 

@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from app.models.database import Connector, ConnectorType, ConnectorStatus
 from app.services import connectors as conn_svc
-from app.services.auth import get_current_customer
+from app.middleware.auth import get_current_customer
 
 router = APIRouter(prefix="/connectors", tags=["connectors"])
 

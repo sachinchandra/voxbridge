@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from app.models.database import AssistSession
 from app.services import agent_assist as assist_svc
-from app.services.auth import get_current_customer
+from app.middleware.auth import get_current_customer
 
 router = APIRouter(prefix="/agent-assist", tags=["agent-assist"])
 
