@@ -1080,3 +1080,165 @@ class ConnectorEvent(BaseModel):
     message: str = ""
     metadata: dict = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ──────────────────────────────────────────────────────────────────
+# Agent Assist models
+# ──────────────────────────────────────────────────────────────────
+
+class SuggestionType(str, Enum):
+    RESPONSE = "response"              # Suggested reply for the human agent
+    KNOWLEDGE = "knowledge"            # Relevant KB article / snippet
+    COMPLIANCE = "compliance"          # Compliance warning or reminder
+    ACTION = "action"                  # Suggested action (create ticket, etc.)
+    SENTIMENT = "sentiment"            # Caller sentiment alert
+
+
+class AssistSuggestion(BaseModel):
+    """A real-time suggestion surfaced to the human agent."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    session_id: str = ""
+    type: SuggestionType = SuggestionType.RESPONSE
+    content: str = ""                  # The suggestion text
+    confidence: float = 0.0            # 0-1 confidence score
+    source: str = ""                   # Where it came from (KB doc, compliance rule, etc.)
+    accepted: bool | None = None       # True=used, False=dismissed, None=pending
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class AssistSessionStatus(str, Enum):
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    PAUSED = "paused"
+
+
+class AssistSession(BaseModel):
+    """An Agent Assist session — AI listening to a human-agent call."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_id: str = ""
+    call_id: str = ""                  # The call being assisted
+    agent_id: str = ""                 # The AI agent providing assistance
+    human_agent_name: str = ""         # The human agent being assisted
+    status: AssistSessionStatus = AssistSessionStatus.ACTIVE
+    # Transcript so far (for context)
+    transcript: list[dict] = Field(default_factory=list)   # [{role, content, timestamp}]
+    suggestions: list[AssistSuggestion] = Field(default_factory=list)
+    suggestions_accepted: int = 0
+    suggestions_dismissed: int = 0
+    # Compliance tracking
+    compliance_warnings: int = 0
+    pii_detected: bool = False
+    # Call summary (generated at end)
+    call_summary: str = ""
+    next_steps: list[str] = Field(default_factory=list)
+    caller_sentiment: str = "neutral"  # positive | neutral | negative
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    ended_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class AssistSessionSummary(BaseModel):
+    """Summary stats for Agent Assist usage."""
+    total_sessions: int = 0
+    active_sessions: int = 0
+    total_suggestions: int = 0
+    acceptance_rate: float = 0.0
+    compliance_warnings: int = 0
+    avg_suggestions_per_session: float = 0.0
+
+
+# ──────────────────────────────────────────────────────────────────
+# Compliance & Audit Log models
+# ──────────────────────────────────────────────────────────────────
+
+class ComplianceRuleType(str, Enum):
+    PII_REDACTION = "pii_redaction"            # Auto-redact SSN, credit cards
+    SCRIPT_ADHERENCE = "script_adherence"      # Did AI follow required script?
+    DISCLOSURE_REQUIRED = "disclosure_required" # Required disclosures (e.g. "this call is recorded")
+    FORBIDDEN_PHRASES = "forbidden_phrases"    # Phrases AI must never say
+    DATA_RETENTION = "data_retention"          # Data retention policies
+    HIPAA = "hipaa"                            # HIPAA compliance checks
+    PCI_DSS = "pci_dss"                        # PCI DSS credit card handling
+
+
+class ComplianceRule(BaseModel):
+    """A compliance rule that calls are checked against."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_id: str = ""
+    name: str = ""
+    rule_type: ComplianceRuleType = ComplianceRuleType.PII_REDACTION
+    enabled: bool = True
+    config: dict = Field(default_factory=dict)
+    # e.g. {"patterns": ["\\d{3}-\\d{2}-\\d{4}"], "action": "redact"}
+    # e.g. {"required_phrases": ["This call may be recorded"]}
+    # e.g. {"forbidden": ["I guarantee", "100% certain"]}
+    severity: str = "warning"          # info | warning | critical
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    model_config = {"from_attributes": True}
+
+
+class ComplianceViolation(BaseModel):
+    """A compliance violation detected during a call."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_id: str = ""
+    call_id: str = ""
+    rule_id: str = ""
+    rule_name: str = ""
+    rule_type: ComplianceRuleType = ComplianceRuleType.PII_REDACTION
+    severity: str = "warning"
+    description: str = ""
+    transcript_excerpt: str = ""       # The offending text
+    redacted_text: str = ""            # Redacted version if applicable
+    resolved: bool = False
+    resolved_by: str = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    model_config = {"from_attributes": True}
+
+
+class AuditAction(str, Enum):
+    LOGIN = "login"
+    LOGOUT = "logout"
+    AGENT_CREATE = "agent_create"
+    AGENT_UPDATE = "agent_update"
+    AGENT_DELETE = "agent_delete"
+    CALL_INITIATED = "call_initiated"
+    CALL_ESCALATED = "call_escalated"
+    KB_UPLOAD = "kb_upload"
+    KB_DELETE = "kb_delete"
+    RULE_CREATE = "rule_create"
+    RULE_UPDATE = "rule_update"
+    SETTINGS_CHANGE = "settings_change"
+    DATA_EXPORT = "data_export"
+    DATA_DELETE = "data_delete"
+    COMPLIANCE_VIOLATION = "compliance_violation"
+    CONNECTOR_ACTIVATE = "connector_activate"
+
+
+class AuditLogEntry(BaseModel):
+    """Immutable audit log entry for compliance and security."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_id: str = ""
+    user_email: str = ""
+    action: AuditAction = AuditAction.LOGIN
+    resource_type: str = ""            # agent | call | kb | rule | connector
+    resource_id: str = ""
+    description: str = ""
+    metadata: dict = Field(default_factory=dict)
+    ip_address: str = ""
+    user_agent: str = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ComplianceSummary(BaseModel):
+    """Compliance overview for a customer."""
+    total_rules: int = 0
+    enabled_rules: int = 0
+    total_violations: int = 0
+    unresolved_violations: int = 0
+    violations_by_type: dict = Field(default_factory=dict)
+    violations_by_severity: dict = Field(default_factory=dict)
+    recent_violations: list[ComplianceViolation] = Field(default_factory=list)
+    audit_log_count: int = 0

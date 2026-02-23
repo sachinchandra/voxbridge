@@ -12,6 +12,8 @@ import {
   AlertRule, AlertItem, AlertSummaryData,
   Department, RoutingRule, RoutingResult, RoutingConfigSummary,
   ConnectorItem, ConnectorEvent, ConnectorHealth,
+  AssistSessionItem, AssistSessionDetail, AssistSuggestion, AssistSummaryData,
+  ComplianceRuleItem, ComplianceViolationItem, ComplianceSummaryData, AuditLogEntryItem,
 } from '../types';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -563,6 +565,105 @@ export const connectorsApi = {
 
   mapQueue: async (connId: string, external_queue_id: string, department_id: string): Promise<void> => {
     await api.post(`/connectors/${connId}/map-queue`, { external_queue_id, department_id });
+  },
+};
+
+// -- Agent Assist ------------------------------------------------------------
+
+export const agentAssistApi = {
+  startSession: async (payload: { call_id?: string; agent_id?: string; human_agent_name?: string }): Promise<AssistSessionDetail> => {
+    const { data } = await api.post('/agent-assist/sessions', payload);
+    return data;
+  },
+
+  listSessions: async (activeOnly?: boolean): Promise<AssistSessionItem[]> => {
+    const { data } = await api.get('/agent-assist/sessions', { params: { active_only: activeOnly } });
+    return data;
+  },
+
+  getSession: async (sessionId: string): Promise<AssistSessionDetail> => {
+    const { data } = await api.get(`/agent-assist/sessions/${sessionId}`);
+    return data;
+  },
+
+  endSession: async (sessionId: string): Promise<any> => {
+    const { data } = await api.post(`/agent-assist/sessions/${sessionId}/end`);
+    return data;
+  },
+
+  addTranscript: async (sessionId: string, role: string, content: string): Promise<{ suggestions: AssistSuggestion[]; transcript_length: number; caller_sentiment: string }> => {
+    const { data } = await api.post(`/agent-assist/sessions/${sessionId}/transcript`, { role, content });
+    return data;
+  },
+
+  acceptSuggestion: async (sessionId: string, suggestionId: string): Promise<void> => {
+    await api.post(`/agent-assist/sessions/${sessionId}/accept/${suggestionId}`);
+  },
+
+  dismissSuggestion: async (sessionId: string, suggestionId: string): Promise<void> => {
+    await api.post(`/agent-assist/sessions/${sessionId}/dismiss/${suggestionId}`);
+  },
+
+  getSummary: async (): Promise<AssistSummaryData> => {
+    const { data } = await api.get('/agent-assist/summary');
+    return data;
+  },
+};
+
+// -- Compliance & Audit ------------------------------------------------------
+
+export const complianceApi = {
+  listRules: async (): Promise<ComplianceRuleItem[]> => {
+    const { data } = await api.get('/compliance/rules');
+    return data;
+  },
+
+  createRule: async (payload: { name: string; rule_type?: string; severity?: string; config?: Record<string, any> }): Promise<ComplianceRuleItem> => {
+    const { data } = await api.post('/compliance/rules', payload);
+    return data;
+  },
+
+  updateRule: async (ruleId: string, payload: Partial<ComplianceRuleItem>): Promise<ComplianceRuleItem> => {
+    const { data } = await api.patch(`/compliance/rules/${ruleId}`, payload);
+    return data;
+  },
+
+  deleteRule: async (ruleId: string): Promise<void> => {
+    await api.delete(`/compliance/rules/${ruleId}`);
+  },
+
+  createDefaults: async (): Promise<{ created: number }> => {
+    const { data } = await api.post('/compliance/rules/defaults');
+    return data;
+  },
+
+  scanTranscript: async (callId: string, transcript: Array<{ role: string; content: string }>): Promise<{ violations_found: number; violations: ComplianceViolationItem[] }> => {
+    const { data } = await api.post('/compliance/scan', { call_id: callId, transcript });
+    return data;
+  },
+
+  listViolations: async (params?: { unresolved_only?: boolean; rule_type?: string; limit?: number }): Promise<ComplianceViolationItem[]> => {
+    const { data } = await api.get('/compliance/violations', { params });
+    return data;
+  },
+
+  resolveViolation: async (violationId: string): Promise<void> => {
+    await api.post(`/compliance/violations/${violationId}/resolve`);
+  },
+
+  redactText: async (text: string): Promise<{ original_length: number; redacted: string }> => {
+    const { data } = await api.post('/compliance/redact', { text });
+    return data;
+  },
+
+  getSummary: async (): Promise<ComplianceSummaryData> => {
+    const { data } = await api.get('/compliance/summary');
+    return data;
+  },
+
+  getAuditLog: async (params?: { action?: string; limit?: number }): Promise<AuditLogEntryItem[]> => {
+    const { data } = await api.get('/compliance/audit-log', { params });
+    return data;
   },
 };
 

@@ -532,6 +532,117 @@ export interface ConnectorHealth {
   error: string;
 }
 
+// -- Agent Assist ------------------------------------------------------------
+
+export type SuggestionType = 'response' | 'knowledge' | 'compliance' | 'action' | 'sentiment';
+
+export interface AssistSuggestion {
+  id: string;
+  session_id: string;
+  type: SuggestionType;
+  content: string;
+  confidence: number;
+  source: string;
+  accepted: boolean | null;
+  created_at: string;
+}
+
+export interface AssistSessionItem {
+  id: string;
+  call_id: string;
+  human_agent_name: string;
+  status: 'active' | 'completed' | 'paused';
+  suggestions_count: number;
+  suggestions_accepted: number;
+  compliance_warnings: number;
+  caller_sentiment: string;
+  created_at: string;
+}
+
+export interface AssistSessionDetail {
+  id: string;
+  customer_id: string;
+  call_id: string;
+  agent_id: string;
+  human_agent_name: string;
+  status: string;
+  transcript: Array<{ role: string; content: string; timestamp: string }>;
+  suggestions: AssistSuggestion[];
+  suggestions_accepted: number;
+  suggestions_dismissed: number;
+  compliance_warnings: number;
+  pii_detected: boolean;
+  call_summary: string;
+  next_steps: string[];
+  caller_sentiment: string;
+  created_at: string;
+  ended_at: string | null;
+}
+
+export interface AssistSummaryData {
+  total_sessions: number;
+  active_sessions: number;
+  total_suggestions: number;
+  acceptance_rate: number;
+  compliance_warnings: number;
+  avg_suggestions_per_session: number;
+}
+
+// -- Compliance & Audit ------------------------------------------------------
+
+export type ComplianceRuleType = 'pii_redaction' | 'script_adherence' | 'disclosure_required' | 'forbidden_phrases' | 'data_retention' | 'hipaa' | 'pci_dss';
+
+export interface ComplianceRuleItem {
+  id: string;
+  customer_id: string;
+  name: string;
+  rule_type: ComplianceRuleType;
+  enabled: boolean;
+  config: Record<string, any>;
+  severity: string;
+  created_at: string;
+}
+
+export interface ComplianceViolationItem {
+  id: string;
+  customer_id: string;
+  call_id: string;
+  rule_id: string;
+  rule_name: string;
+  rule_type: ComplianceRuleType;
+  severity: string;
+  description: string;
+  transcript_excerpt: string;
+  redacted_text: string;
+  resolved: boolean;
+  resolved_by: string;
+  created_at: string;
+}
+
+export interface ComplianceSummaryData {
+  total_rules: number;
+  enabled_rules: number;
+  total_violations: number;
+  unresolved_violations: number;
+  violations_by_type: Record<string, number>;
+  violations_by_severity: Record<string, number>;
+  recent_violations: ComplianceViolationItem[];
+  audit_log_count: number;
+}
+
+export interface AuditLogEntryItem {
+  id: string;
+  customer_id: string;
+  user_email: string;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  description: string;
+  metadata: Record<string, any>;
+  ip_address: string;
+  created_at: string;
+}
+
 export interface AnalyticsDetail {
   total_calls: number;
   ai_handled: number;

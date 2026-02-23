@@ -15,6 +15,8 @@ const navItems = [
   { path: '/dashboard/alerts', label: 'Alerts', icon: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9', section: 'main' },
   { path: '/dashboard/routing', label: 'Routing', icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4', section: 'main' },
   { path: '/dashboard/connectors', label: 'Connectors', icon: 'M13 10V3L4 14h7v7l9-11h-7z', section: 'main' },
+  { path: '/dashboard/agent-assist', label: 'Agent Assist', icon: 'M18 13V6a2 2 0 00-2-2H8a2 2 0 00-2 2v7m8 0V6m0 7H6m0 0v4a2 2 0 002 2h8a2 2 0 002-2v-4m-6 0h4', section: 'main' },
+  { path: '/dashboard/compliance', label: 'Compliance', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z', section: 'main' },
   { path: '/dashboard/quickstart', label: 'Quick Start', icon: 'M13 10V3L4 14h7v7l9-11h-7z', section: 'settings' },
   { path: '/dashboard/keys', label: 'API Keys', icon: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z', section: 'settings' },
   { path: '/dashboard/usage', label: 'Usage', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', section: 'settings' },

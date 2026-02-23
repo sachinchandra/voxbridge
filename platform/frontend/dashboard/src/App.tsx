@@ -21,6 +21,8 @@ import FlowBuilder from './pages/FlowBuilder';
 import Alerts from './pages/Alerts';
 import Routing from './pages/Routing';
 import Connectors from './pages/Connectors';
+import AgentAssist from './pages/AgentAssist';
+import Compliance from './pages/Compliance';
 import QuickStart from './pages/QuickStart';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -87,6 +89,8 @@ function App() {
             <Route path="alerts" element={<Alerts />} />
             <Route path="routing" element={<Routing />} />
             <Route path="connectors" element={<Connectors />} />
+            <Route path="agent-assist" element={<AgentAssist />} />
+            <Route path="compliance" element={<Compliance />} />
             <Route path="quickstart" element={<QuickStart />} />
             <Route path="keys" element={<ApiKeys />} />
             <Route path="usage" element={<Usage />} />
