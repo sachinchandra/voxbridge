@@ -346,6 +346,101 @@ export interface QAReportPreview {
   };
 }
 
+// ── Conversation Flows ──────────────────────────────────────────
+
+export type FlowNodeType = 'start' | 'message' | 'listen' | 'ai_respond' | 'condition' | 'tool_call' | 'transfer' | 'end';
+
+export interface FlowNode {
+  id: string;
+  type: FlowNodeType;
+  label: string;
+  x: number;
+  y: number;
+  config: Record<string, any>;
+}
+
+export interface FlowEdge {
+  id: string;
+  source_id: string;
+  target_id: string;
+  label: string;
+  condition: string;
+}
+
+export interface ConversationFlow {
+  id: string;
+  agent_id: string;
+  name: string;
+  description: string;
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+  is_active: boolean;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FlowListItem {
+  id: string;
+  agent_id: string;
+  name: string;
+  description: string;
+  is_active: boolean;
+  version: number;
+  node_count: number;
+  edge_count: number;
+  created_at: string;
+}
+
+export interface FlowTestResult {
+  flow_id: string;
+  version: number;
+  path: string[];
+  messages: Array<{ role: string; content: string }>;
+  completed: boolean;
+  end_reason: string;
+  duration_ms: number;
+}
+
+// ── Alerts ─────────────────────────────────────────────────────
+
+export type AlertSeverity = 'info' | 'warning' | 'critical';
+export type AlertTypeEnum = 'high_volume' | 'angry_caller_spike' | 'low_quality_score' | 'high_escalation_rate' | 'pii_detected' | 'agent_down' | 'api_failure' | 'cost_threshold';
+
+export interface AlertRule {
+  id: string;
+  name: string;
+  alert_type: AlertTypeEnum;
+  severity: AlertSeverity;
+  enabled: boolean;
+  config: Record<string, any>;
+  notify_email: boolean;
+  notify_webhook: string;
+  created_at: string;
+}
+
+export interface AlertItem {
+  id: string;
+  rule_id: string;
+  alert_type: AlertTypeEnum;
+  severity: AlertSeverity;
+  title: string;
+  message: string;
+  metadata: Record<string, any>;
+  acknowledged: boolean;
+  acknowledged_at: string | null;
+  created_at: string;
+}
+
+export interface AlertSummaryData {
+  total: number;
+  unacknowledged: number;
+  critical: number;
+  warning: number;
+  info: number;
+  recent: AlertItem[];
+}
+
 export interface AnalyticsDetail {
   total_calls: number;
   ai_handled: number;

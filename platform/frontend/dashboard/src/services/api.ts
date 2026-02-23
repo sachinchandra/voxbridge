@@ -8,6 +8,8 @@ import {
   QAScore, QASummary, AnalyticsDetail,
   PlaygroundStartResponse, PlaygroundResponse, PlaygroundSessionDetail,
   QAReportPreview,
+  ConversationFlow, FlowListItem, FlowTestResult,
+  AlertRule, AlertItem, AlertSummaryData,
 } from '../types';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -343,6 +345,96 @@ export const qaReportsApi = {
   },
 
   previewUrl: `${API_URL}/api/v1/qa-reports/preview`,
+};
+
+// ── Conversation Flows ──────────────────────────────────────────
+
+export const flowsApi = {
+  list: async (): Promise<FlowListItem[]> => {
+    const { data } = await api.get('/flows');
+    return data;
+  },
+
+  get: async (flowId: string): Promise<ConversationFlow> => {
+    const { data } = await api.get(`/flows/${flowId}`);
+    return data;
+  },
+
+  create: async (payload: { agent_id?: string; name: string; description?: string }): Promise<ConversationFlow> => {
+    const { data } = await api.post('/flows', payload);
+    return data;
+  },
+
+  update: async (flowId: string, payload: Partial<ConversationFlow>): Promise<ConversationFlow> => {
+    const { data } = await api.patch(`/flows/${flowId}`, payload);
+    return data;
+  },
+
+  delete: async (flowId: string): Promise<void> => {
+    await api.delete(`/flows/${flowId}`);
+  },
+
+  activate: async (flowId: string): Promise<{ activated: boolean }> => {
+    const { data } = await api.post(`/flows/${flowId}/activate`);
+    return data;
+  },
+
+  test: async (flowId: string, inputs: string[]): Promise<FlowTestResult> => {
+    const { data } = await api.post(`/flows/${flowId}/test`, { inputs });
+    return data;
+  },
+
+  createDefault: async (agentId: string, name?: string): Promise<ConversationFlow> => {
+    const { data } = await api.post('/flows/default', { agent_id: agentId, name });
+    return data;
+  },
+};
+
+// ── Alerts ──────────────────────────────────────────────────────
+
+export const alertsApi = {
+  listRules: async (): Promise<AlertRule[]> => {
+    const { data } = await api.get('/alerts/rules');
+    return data;
+  },
+
+  createRule: async (payload: Partial<AlertRule>): Promise<AlertRule> => {
+    const { data } = await api.post('/alerts/rules', payload);
+    return data;
+  },
+
+  updateRule: async (ruleId: string, payload: Partial<AlertRule>): Promise<AlertRule> => {
+    const { data } = await api.patch(`/alerts/rules/${ruleId}`, payload);
+    return data;
+  },
+
+  deleteRule: async (ruleId: string): Promise<void> => {
+    await api.delete(`/alerts/rules/${ruleId}`);
+  },
+
+  createDefaults: async (): Promise<{ created: number }> => {
+    const { data } = await api.post('/alerts/rules/defaults');
+    return data;
+  },
+
+  list: async (params?: { unacknowledged?: boolean; severity?: string; limit?: number }): Promise<AlertItem[]> => {
+    const { data } = await api.get('/alerts', { params });
+    return data;
+  },
+
+  getSummary: async (): Promise<AlertSummaryData> => {
+    const { data } = await api.get('/alerts/summary');
+    return data;
+  },
+
+  acknowledge: async (alertId: string): Promise<void> => {
+    await api.post(`/alerts/${alertId}/acknowledge`);
+  },
+
+  acknowledgeAll: async (): Promise<{ acknowledged: number }> => {
+    const { data } = await api.post('/alerts/acknowledge-all');
+    return data;
+  },
 };
 
 export default api;

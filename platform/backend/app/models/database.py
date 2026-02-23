@@ -800,3 +800,162 @@ class QAWeeklyReport(BaseModel):
     top_agents: list[dict] = Field(default_factory=list)  # [{name, score, calls}]
     improvement_areas: list[str] = Field(default_factory=list)
     score_trend: str = "stable"  # improving | stable | declining
+
+
+# ──────────────────────────────────────────────────────────────────
+# Conversation Flow models
+# ──────────────────────────────────────────────────────────────────
+
+class FlowNodeType(str, Enum):
+    START = "start"
+    MESSAGE = "message"          # AI speaks a scripted message
+    LISTEN = "listen"            # Wait for user input
+    AI_RESPOND = "ai_respond"    # Free-form AI response using LLM
+    CONDITION = "condition"      # Branch based on intent/keyword/sentiment
+    TOOL_CALL = "tool_call"      # Execute a function/API call
+    TRANSFER = "transfer"        # Escalate to human
+    END = "end"
+
+
+class FlowNode(BaseModel):
+    """A single node in a conversation flow."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    type: FlowNodeType = FlowNodeType.MESSAGE
+    label: str = ""
+    # Position for visual canvas
+    x: float = 0.0
+    y: float = 0.0
+    # Config varies by type
+    config: dict = Field(default_factory=dict)
+    # config examples:
+    #   message: {text: "Hello! How can I help?"}
+    #   listen: {timeout_seconds: 10, no_input_node_id: "..."}
+    #   ai_respond: {system_prompt_override: "", max_tokens: 200}
+    #   condition: {rules: [{match: "refund|return", target_node_id: "..."}, {match: "*", target_node_id: "..."}]}
+    #   tool_call: {tool_name: "check_order", input_map: {"order_id": "{{user_input}}"}}
+    #   transfer: {target_number: "+1...", context_summary: true}
+
+
+class FlowEdge(BaseModel):
+    """Connection between two nodes."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    source_id: str = ""
+    target_id: str = ""
+    label: str = ""  # edge label for condition branches
+    condition: str = ""  # optional: keyword match, intent, default
+
+
+class ConversationFlow(BaseModel):
+    """A complete conversation flow (visual decision tree)."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_id: str = ""
+    agent_id: str = ""
+    name: str = ""
+    description: str = ""
+    nodes: list[FlowNode] = Field(default_factory=list)
+    edges: list[FlowEdge] = Field(default_factory=list)
+    is_active: bool = False
+    version: int = 1
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    model_config = {"from_attributes": True}
+
+
+class FlowVersion(BaseModel):
+    """Versioned snapshot of a flow for A/B testing."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    flow_id: str = ""
+    version: int = 1
+    name: str = ""  # e.g. "Variant A", "Variant B"
+    nodes: list[FlowNode] = Field(default_factory=list)
+    edges: list[FlowEdge] = Field(default_factory=list)
+    traffic_percent: int = 100  # 0-100, for A/B split
+    calls_count: int = 0
+    avg_resolution_rate: float = 0.0
+    avg_duration_seconds: float = 0.0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class FlowTestResult(BaseModel):
+    """Result of simulating a flow with test input."""
+    flow_id: str = ""
+    version: int = 1
+    path: list[str] = Field(default_factory=list)  # node IDs traversed
+    messages: list[dict] = Field(default_factory=list)  # conversation transcript
+    completed: bool = False
+    end_reason: str = ""  # completed | transfer | timeout | error
+    duration_ms: int = 0
+
+
+# ──────────────────────────────────────────────────────────────────
+# Alert models
+# ──────────────────────────────────────────────────────────────────
+
+class AlertSeverity(str, Enum):
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
+class AlertType(str, Enum):
+    HIGH_VOLUME = "high_volume"
+    ANGRY_CALLER_SPIKE = "angry_caller_spike"
+    LOW_QUALITY_SCORE = "low_quality_score"
+    HIGH_ESCALATION_RATE = "high_escalation_rate"
+    PII_DETECTED = "pii_detected"
+    AGENT_DOWN = "agent_down"
+    API_FAILURE = "api_failure"
+    COST_THRESHOLD = "cost_threshold"
+
+
+class AlertRule(BaseModel):
+    """A customer-defined alert trigger rule."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_id: str = ""
+    name: str = ""
+    alert_type: AlertType = AlertType.HIGH_VOLUME
+    severity: AlertSeverity = AlertSeverity.WARNING
+    enabled: bool = True
+    # Threshold config
+    config: dict = Field(default_factory=dict)
+    # config examples:
+    #   high_volume: {threshold: 100, window_minutes: 60}
+    #   angry_caller_spike: {threshold: 5, window_minutes: 30}
+    #   low_quality_score: {threshold: 50, agent_id: "optional"}
+    #   high_escalation_rate: {threshold_percent: 40, min_calls: 10}
+    #   pii_detected: {}  (always triggers)
+    #   cost_threshold: {daily_limit_cents: 10000}
+    # Notification channels
+    notify_email: bool = True
+    notify_webhook: str = ""  # optional webhook URL
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    model_config = {"from_attributes": True}
+
+
+class Alert(BaseModel):
+    """A triggered alert instance."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_id: str = ""
+    rule_id: str = ""
+    alert_type: AlertType = AlertType.HIGH_VOLUME
+    severity: AlertSeverity = AlertSeverity.WARNING
+    title: str = ""
+    message: str = ""
+    metadata: dict = Field(default_factory=dict)  # context data
+    acknowledged: bool = False
+    acknowledged_at: datetime | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    model_config = {"from_attributes": True}
+
+
+class AlertSummary(BaseModel):
+    """Dashboard summary of alerts."""
+    total: int = 0
+    unacknowledged: int = 0
+    critical: int = 0
+    warning: int = 0
+    info: int = 0
+    recent: list[Alert] = Field(default_factory=list)
