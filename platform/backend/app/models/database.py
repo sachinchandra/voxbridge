@@ -959,3 +959,124 @@ class AlertSummary(BaseModel):
     warning: int = 0
     info: int = 0
     recent: list[Alert] = Field(default_factory=list)
+
+
+# ──────────────────────────────────────────────────────────────────
+# Multi-Department Routing models
+# ──────────────────────────────────────────────────────────────────
+
+class Department(BaseModel):
+    """A department that calls can be routed to."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_id: str = ""
+    name: str = ""                   # e.g. "Sales", "Support", "Billing"
+    description: str = ""
+    agent_id: str | None = None      # AI agent assigned to this dept
+    transfer_number: str = ""        # human escalation number
+    priority: int = 0                # lower = higher priority
+    is_default: bool = False         # fallback department
+    enabled: bool = True
+    # Intent keywords for routing
+    intent_keywords: list[str] = Field(default_factory=list)
+    # e.g. ["buy", "purchase", "pricing", "quote"] for Sales
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    model_config = {"from_attributes": True}
+
+
+class RoutingRule(BaseModel):
+    """A rule that maps caller intent to a department."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_id: str = ""
+    name: str = ""
+    department_id: str = ""
+    # Matching criteria
+    match_type: str = "keyword"      # keyword | regex | intent_model | dtmf
+    match_value: str = ""            # pattern, keyword list, or DTMF digit
+    # Conditions
+    time_range: dict = Field(default_factory=dict)  # {start: "09:00", end: "17:00", timezone: "US/Eastern"}
+    priority: int = 0
+    enabled: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    model_config = {"from_attributes": True}
+
+
+class RoutingResult(BaseModel):
+    """Result of routing a call to a department."""
+    department_id: str = ""
+    department_name: str = ""
+    agent_id: str | None = None
+    transfer_number: str = ""
+    confidence: float = 0.0          # 0-1 confidence score
+    matched_rule: str = ""           # rule ID that matched
+    matched_keywords: list[str] = Field(default_factory=list)
+    fallback: bool = False           # true if routed to default dept
+
+
+class RoutingConfig(BaseModel):
+    """Customer's routing configuration."""
+    customer_id: str = ""
+    greeting_message: str = "Welcome! How can I help you today?"
+    use_ai_intent: bool = True       # use NLP vs simple keyword matching
+    max_classification_attempts: int = 2
+    fallback_message: str = "Let me connect you with someone who can help."
+    departments: list[Department] = Field(default_factory=list)
+    rules: list[RoutingRule] = Field(default_factory=list)
+
+
+# ──────────────────────────────────────────────────────────────────
+# Contact Center Connector models
+# ──────────────────────────────────────────────────────────────────
+
+class ConnectorType(str, Enum):
+    GENESYS = "genesys"
+    AMAZON_CONNECT = "amazon_connect"
+    AVAYA = "avaya"
+    CISCO = "cisco"
+    TWILIO = "twilio"
+    FIVE9 = "five9"
+    GENERIC_SIP = "generic_sip"
+
+
+class ConnectorStatus(str, Enum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    ERROR = "error"
+    CONFIGURING = "configuring"
+
+
+class Connector(BaseModel):
+    """A contact center platform connector."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_id: str = ""
+    name: str = ""
+    connector_type: ConnectorType = ConnectorType.TWILIO
+    status: ConnectorStatus = ConnectorStatus.INACTIVE
+    # Connection config (varies by type)
+    config: dict = Field(default_factory=dict)
+    # Genesys: {org_id, client_id, client_secret, region, audiohook_uri}
+    # Amazon Connect: {instance_id, region, access_key, queue_id}
+    # Avaya: {host, port, username, station_extension}
+    # Cisco: {finesse_url, username, team_id}
+    # Twilio: {account_sid, auth_token, trunking_domain}
+    # Routing
+    department_mappings: dict = Field(default_factory=dict)  # {ext_queue_id: dept_id}
+    # Stats
+    total_calls_routed: int = 0
+    last_active_at: datetime | None = None
+    error_message: str = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    model_config = {"from_attributes": True}
+
+
+class ConnectorEvent(BaseModel):
+    """An event from a contact center connector."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    connector_id: str = ""
+    event_type: str = ""             # connected | disconnected | call_routed | error
+    message: str = ""
+    metadata: dict = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

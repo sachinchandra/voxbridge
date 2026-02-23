@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from app.config import settings
-from app.api import agents, alerts, auth, billing, calls, flows, keys, knowledge_bases, phone_numbers, playground, qa, qa_email, usage, webhooks
+from app.api import agents, alerts, auth, billing, calls, connectors, flows, keys, knowledge_bases, phone_numbers, playground, qa, qa_email, routing, usage, webhooks
 
 # ──────────────────────────────────────────────────────────────────
 # Application factory
@@ -50,6 +50,8 @@ def create_app() -> FastAPI:
     app.include_router(qa_email.router, prefix="/api/v1")
     app.include_router(flows.router, prefix="/api/v1")
     app.include_router(alerts.router, prefix="/api/v1")
+    app.include_router(routing.router, prefix="/api/v1")
+    app.include_router(connectors.router, prefix="/api/v1")
     app.include_router(webhooks.router, prefix="/api/v1")
 
     # Health check

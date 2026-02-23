@@ -441,6 +441,97 @@ export interface AlertSummaryData {
   recent: AlertItem[];
 }
 
+// -- Departments & Routing ---------------------------------------------------
+
+export interface Department {
+  id: string;
+  customer_id: string;
+  name: string;
+  description: string;
+  agent_id: string;
+  transfer_number: string;
+  priority: number;
+  is_default: boolean;
+  enabled: boolean;
+  intent_keywords: string[];
+  created_at: string;
+}
+
+export interface RoutingRule {
+  id: string;
+  customer_id: string;
+  name: string;
+  department_id: string;
+  match_type: 'keyword' | 'regex' | 'dtmf' | 'intent_model';
+  match_value: string;
+  priority: number;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface RoutingResult {
+  department_id: string;
+  department_name: string;
+  agent_id: string;
+  transfer_number: string;
+  confidence: number;
+  matched_rule: string;
+  matched_keywords: string[];
+  fallback: boolean;
+}
+
+export interface RoutingConfigSummary {
+  departments: number;
+  rules: number;
+  default_department: string | null;
+  department_list: Array<{
+    id: string;
+    name: string;
+    priority: number;
+    enabled: boolean;
+    is_default: boolean;
+  }>;
+}
+
+// -- Connectors --------------------------------------------------------------
+
+export type ConnectorType = 'genesys' | 'amazon_connect' | 'avaya' | 'cisco' | 'twilio' | 'five9' | 'generic_sip';
+export type ConnectorStatusType = 'active' | 'inactive' | 'error' | 'configuring';
+
+export interface ConnectorItem {
+  id: string;
+  customer_id: string;
+  name: string;
+  connector_type: ConnectorType;
+  status: ConnectorStatusType;
+  config: Record<string, any>;
+  department_mappings: Record<string, string>;
+  total_calls_routed: number;
+  last_active_at: string | null;
+  error_message: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConnectorEvent {
+  id: string;
+  connector_id: string;
+  event_type: string;
+  message: string;
+  metadata: Record<string, any>;
+  created_at: string;
+}
+
+export interface ConnectorHealth {
+  healthy: boolean;
+  status: ConnectorStatusType;
+  name: string;
+  type: ConnectorType;
+  total_calls_routed: number;
+  last_active_at: string | null;
+  error: string;
+}
+
 export interface AnalyticsDetail {
   total_calls: number;
   ai_handled: number;

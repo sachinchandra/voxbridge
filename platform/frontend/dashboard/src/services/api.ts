@@ -10,6 +10,8 @@ import {
   QAReportPreview,
   ConversationFlow, FlowListItem, FlowTestResult,
   AlertRule, AlertItem, AlertSummaryData,
+  Department, RoutingRule, RoutingResult, RoutingConfigSummary,
+  ConnectorItem, ConnectorEvent, ConnectorHealth,
 } from '../types';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -434,6 +436,133 @@ export const alertsApi = {
   acknowledgeAll: async (): Promise<{ acknowledged: number }> => {
     const { data } = await api.post('/alerts/acknowledge-all');
     return data;
+  },
+};
+
+// -- Routing & Departments ---------------------------------------------------
+
+export const routingApi = {
+  listDepartments: async (): Promise<Department[]> => {
+    const { data } = await api.get('/routing/departments');
+    return data;
+  },
+
+  getDepartment: async (deptId: string): Promise<Department> => {
+    const { data } = await api.get(`/routing/departments/${deptId}`);
+    return data;
+  },
+
+  createDepartment: async (payload: {
+    name: string;
+    description?: string;
+    agent_id?: string;
+    transfer_number?: string;
+    priority?: number;
+    is_default?: boolean;
+    intent_keywords?: string[];
+  }): Promise<Department> => {
+    const { data } = await api.post('/routing/departments', payload);
+    return data;
+  },
+
+  updateDepartment: async (deptId: string, payload: Partial<Department>): Promise<Department> => {
+    const { data } = await api.patch(`/routing/departments/${deptId}`, payload);
+    return data;
+  },
+
+  deleteDepartment: async (deptId: string): Promise<void> => {
+    await api.delete(`/routing/departments/${deptId}`);
+  },
+
+  createDefaults: async (): Promise<{ created: number; departments: Department[] }> => {
+    const { data } = await api.post('/routing/departments/defaults');
+    return data;
+  },
+
+  listRules: async (): Promise<RoutingRule[]> => {
+    const { data } = await api.get('/routing/rules');
+    return data;
+  },
+
+  createRule: async (payload: {
+    name: string;
+    department_id: string;
+    match_type?: string;
+    match_value?: string;
+    priority?: number;
+  }): Promise<RoutingRule> => {
+    const { data } = await api.post('/routing/rules', payload);
+    return data;
+  },
+
+  deleteRule: async (ruleId: string): Promise<void> => {
+    await api.delete(`/routing/rules/${ruleId}`);
+  },
+
+  classify: async (text: string, dtmf_input?: string): Promise<RoutingResult> => {
+    const { data } = await api.post('/routing/classify', { text, dtmf_input });
+    return data;
+  },
+
+  getConfig: async (): Promise<RoutingConfigSummary> => {
+    const { data } = await api.get('/routing/config');
+    return data;
+  },
+};
+
+// -- Connectors --------------------------------------------------------------
+
+export const connectorsApi = {
+  list: async (): Promise<ConnectorItem[]> => {
+    const { data } = await api.get('/connectors');
+    return data;
+  },
+
+  get: async (connId: string): Promise<ConnectorItem> => {
+    const { data } = await api.get(`/connectors/${connId}`);
+    return data;
+  },
+
+  create: async (payload: {
+    name: string;
+    connector_type: string;
+    config?: Record<string, any>;
+  }): Promise<ConnectorItem> => {
+    const { data } = await api.post('/connectors', payload);
+    return data;
+  },
+
+  update: async (connId: string, payload: { name?: string; config?: Record<string, any> }): Promise<ConnectorItem> => {
+    const { data } = await api.patch(`/connectors/${connId}`, payload);
+    return data;
+  },
+
+  delete: async (connId: string): Promise<void> => {
+    await api.delete(`/connectors/${connId}`);
+  },
+
+  activate: async (connId: string): Promise<ConnectorItem> => {
+    const { data } = await api.post(`/connectors/${connId}/activate`);
+    return data;
+  },
+
+  deactivate: async (connId: string): Promise<ConnectorItem> => {
+    const { data } = await api.post(`/connectors/${connId}/deactivate`);
+    return data;
+  },
+
+  getHealth: async (connId: string): Promise<ConnectorHealth> => {
+    const { data } = await api.get(`/connectors/${connId}/health`);
+    return data;
+  },
+
+  getEvents: async (connId: string, limit?: number): Promise<ConnectorEvent[]> => {
+    const { data } = await api.get(`/connectors/${connId}/events`, { params: { limit } });
+    return data;
+  },
+
+  mapQueue: async (connId: string, external_queue_id: string, department_id: string): Promise<void> => {
+    await api.post(`/connectors/${connId}/map-queue`, { external_queue_id, department_id });
   },
 };
 

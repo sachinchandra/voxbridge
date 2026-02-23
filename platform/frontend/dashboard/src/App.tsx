@@ -19,6 +19,8 @@ import QualityAssurance from './pages/QualityAssurance';
 import Playground from './pages/Playground';
 import FlowBuilder from './pages/FlowBuilder';
 import Alerts from './pages/Alerts';
+import Routing from './pages/Routing';
+import Connectors from './pages/Connectors';
 import QuickStart from './pages/QuickStart';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -83,6 +85,8 @@ function App() {
             <Route path="playground" element={<Playground />} />
             <Route path="flows" element={<FlowBuilder />} />
             <Route path="alerts" element={<Alerts />} />
+            <Route path="routing" element={<Routing />} />
+            <Route path="connectors" element={<Connectors />} />
             <Route path="quickstart" element={<QuickStart />} />
             <Route path="keys" element={<ApiKeys />} />
             <Route path="usage" element={<Usage />} />
