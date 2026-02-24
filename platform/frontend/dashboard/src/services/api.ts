@@ -14,6 +14,8 @@ import {
   ConnectorItem, ConnectorEvent, ConnectorHealth,
   AssistSessionItem, AssistSessionDetail, AssistSuggestion, AssistSummaryData,
   ComplianceRuleItem, ComplianceViolationItem, ComplianceSummaryData, AuditLogEntryItem,
+  HumanAgentItem, EscalationItem, StaffingForecastItem, ROIEstimateItem,
+  WorkforceDashboardData, QueueStatusData,
 } from '../types';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -663,6 +665,93 @@ export const complianceApi = {
 
   getAuditLog: async (params?: { action?: string; limit?: number }): Promise<AuditLogEntryItem[]> => {
     const { data } = await api.get('/compliance/audit-log', { params });
+    return data;
+  },
+};
+
+// -- Workforce Management ----------------------------------------------------
+
+export const workforceApi = {
+  // Human Agents
+  listAgents: async (params?: { status?: string; department_id?: string }): Promise<HumanAgentItem[]> => {
+    const { data } = await api.get('/workforce/agents', { params });
+    return data;
+  },
+
+  createAgent: async (payload: { name: string; email?: string; skills?: string[]; department_id?: string; shift_start?: string; shift_end?: string }): Promise<HumanAgentItem> => {
+    const { data } = await api.post('/workforce/agents', payload);
+    return data;
+  },
+
+  updateAgent: async (agentId: string, payload: Partial<HumanAgentItem>): Promise<HumanAgentItem> => {
+    const { data } = await api.patch(`/workforce/agents/${agentId}`, payload);
+    return data;
+  },
+
+  deleteAgent: async (agentId: string): Promise<void> => {
+    await api.delete(`/workforce/agents/${agentId}`);
+  },
+
+  setAgentStatus: async (agentId: string, status: string): Promise<HumanAgentItem> => {
+    const { data } = await api.patch(`/workforce/agents/${agentId}/status`, { status });
+    return data;
+  },
+
+  // Escalations
+  listEscalations: async (params?: { status?: string; department_id?: string }): Promise<EscalationItem[]> => {
+    const { data } = await api.get('/workforce/escalations', { params });
+    return data;
+  },
+
+  createEscalation: async (payload: { call_id: string; department_id?: string; caller_number?: string; caller_name?: string; priority?: string; reason?: string; ai_summary?: string }): Promise<EscalationItem> => {
+    const { data } = await api.post('/workforce/escalations', payload);
+    return data;
+  },
+
+  assignEscalation: async (escId: string, humanAgentId: string): Promise<EscalationItem> => {
+    const { data } = await api.post(`/workforce/escalations/${escId}/assign`, { human_agent_id: humanAgentId });
+    return data;
+  },
+
+  autoAssignEscalation: async (escId: string): Promise<EscalationItem> => {
+    const { data } = await api.post(`/workforce/escalations/${escId}/auto-assign`);
+    return data;
+  },
+
+  resolveEscalation: async (escId: string): Promise<EscalationItem> => {
+    const { data } = await api.post(`/workforce/escalations/${escId}/resolve`);
+    return data;
+  },
+
+  getQueueStatus: async (): Promise<QueueStatusData> => {
+    const { data } = await api.get('/workforce/queue-status');
+    return data;
+  },
+
+  // Forecasting
+  generateForecast: async (payload: { date: string; historical_calls?: any[]; containment_rate?: number; calls_per_agent_per_hour?: number }): Promise<StaffingForecastItem[]> => {
+    const { data } = await api.post('/workforce/forecast/generate', payload);
+    return data;
+  },
+
+  getForecast: async (date: string): Promise<StaffingForecastItem[]> => {
+    const { data } = await api.get('/workforce/forecast', { params: { date } });
+    return data;
+  },
+
+  // Metrics & ROI
+  calculateROI: async (payload: { human_agent_hourly_rate_cents?: number; calls_per_agent_per_hour?: number; total_monthly_calls?: number; containment_rate?: number; avg_call_duration_minutes?: number; ai_cost_per_minute_cents?: number }): Promise<ROIEstimateItem> => {
+    const { data } = await api.post('/workforce/roi', payload);
+    return data;
+  },
+
+  getContainmentTrend: async (weeks?: number): Promise<Array<{ period: string; containment_rate: number; total_calls: number }>> => {
+    const { data } = await api.get('/workforce/containment-trend', { params: { weeks } });
+    return data;
+  },
+
+  getDashboard: async (): Promise<WorkforceDashboardData> => {
+    const { data } = await api.get('/workforce/dashboard');
     return data;
   },
 };

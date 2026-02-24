@@ -643,6 +643,107 @@ export interface AuditLogEntryItem {
   created_at: string;
 }
 
+// -- Workforce Management ----------------------------------------------------
+
+export type HumanAgentStatusType = 'available' | 'busy' | 'offline' | 'break';
+export type EscalationPriorityType = 'low' | 'normal' | 'high' | 'urgent';
+export type EscalationStatusType = 'waiting' | 'assigned' | 'resolved' | 'abandoned';
+
+export interface HumanAgentItem {
+  id: string;
+  customer_id: string;
+  name: string;
+  email: string;
+  status: HumanAgentStatusType;
+  skills: string[];
+  department_id: string;
+  current_call_id: string | null;
+  shift_start: string;
+  shift_end: string;
+  calls_handled_today: number;
+  busy_minutes_today: number;
+  created_at: string;
+}
+
+export interface EscalationItem {
+  id: string;
+  customer_id: string;
+  department_id: string;
+  call_id: string;
+  caller_number: string;
+  caller_name: string;
+  priority: EscalationPriorityType;
+  status: EscalationStatusType;
+  human_agent_id: string | null;
+  reason: string;
+  ai_summary: string;
+  wait_time_seconds: number;
+  handle_time_seconds: number;
+  created_at: string;
+  assigned_at: string | null;
+  resolved_at: string | null;
+}
+
+export interface StaffingForecastItem {
+  id: string;
+  customer_id: string;
+  date: string;
+  hour: number;
+  predicted_volume: number;
+  predicted_ai_handled: number;
+  predicted_escalations: number;
+  recommended_staff: number;
+  confidence: number;
+}
+
+export interface WorkforceMetricsItem {
+  id: string;
+  customer_id: string;
+  period_start: string;
+  period_end: string;
+  total_calls: number;
+  ai_handled: number;
+  human_handled: number;
+  containment_rate: number;
+  avg_wait_time_seconds: number;
+  avg_handle_time_seconds: number;
+  escalation_rate: number;
+  cost_savings_cents: number;
+  created_at: string;
+}
+
+export interface ROIEstimateItem {
+  human_cost_per_month_cents: number;
+  ai_cost_per_month_cents: number;
+  monthly_savings_cents: number;
+  annual_savings_cents: number;
+  savings_percentage: number;
+  calls_per_month: number;
+  containment_rate: number;
+}
+
+export interface WorkforceDashboardData {
+  active_human_agents: number;
+  total_human_agents: number;
+  queue_length: number;
+  avg_wait_time_seconds: number;
+  containment_rate: number;
+  containment_trend: Array<{ period: string; containment_rate: number; total_calls: number }>;
+  escalation_rate: number;
+  cost_savings_this_month_cents: number;
+  agents_by_status: Record<string, number>;
+  recent_escalations: EscalationItem[];
+}
+
+export interface QueueStatusData {
+  waiting: number;
+  assigned: number;
+  resolved_today: number;
+  abandoned_today: number;
+  avg_wait_time_seconds: number;
+  longest_waiting_seconds: number;
+}
+
 export interface AnalyticsDetail {
   total_calls: number;
   ai_handled: number;

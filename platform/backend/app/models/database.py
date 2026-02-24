@@ -1242,3 +1242,119 @@ class ComplianceSummary(BaseModel):
     violations_by_severity: dict = Field(default_factory=dict)
     recent_violations: list[ComplianceViolation] = Field(default_factory=list)
     audit_log_count: int = 0
+
+
+# ── Sprint 10: Workforce Management ────────────────────────────────
+
+
+class HumanAgentStatus(str, Enum):
+    AVAILABLE = "available"
+    BUSY = "busy"
+    OFFLINE = "offline"
+    BREAK = "break"
+
+
+class EscalationPriority(str, Enum):
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    URGENT = "urgent"
+
+
+class EscalationStatus(str, Enum):
+    WAITING = "waiting"
+    ASSIGNED = "assigned"
+    RESOLVED = "resolved"
+    ABANDONED = "abandoned"
+
+
+class HumanAgent(BaseModel):
+    """A human agent who handles escalated calls."""
+    id: str = Field(default_factory=lambda: f"hagent_{uuid.uuid4().hex[:12]}")
+    customer_id: str = ""
+    name: str = ""
+    email: str = ""
+    status: HumanAgentStatus = HumanAgentStatus.OFFLINE
+    skills: list[str] = Field(default_factory=list)
+    department_id: str = ""
+    current_call_id: str | None = None
+    shift_start: str = ""          # HH:MM format
+    shift_end: str = ""            # HH:MM format
+    calls_handled_today: int = 0
+    busy_minutes_today: float = 0.0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class EscalationQueue(BaseModel):
+    """A call waiting for or assigned to a human agent."""
+    id: str = Field(default_factory=lambda: f"esc_{uuid.uuid4().hex[:12]}")
+    customer_id: str = ""
+    department_id: str = ""
+    call_id: str = ""
+    caller_number: str = ""
+    caller_name: str = ""
+    priority: EscalationPriority = EscalationPriority.NORMAL
+    status: EscalationStatus = EscalationStatus.WAITING
+    human_agent_id: str | None = None
+    reason: str = ""               # Why AI escalated
+    ai_summary: str = ""           # AI's context handoff
+    wait_time_seconds: float = 0.0
+    handle_time_seconds: float = 0.0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    assigned_at: datetime | None = None
+    resolved_at: datetime | None = None
+
+
+class StaffingForecast(BaseModel):
+    """Predicted call volume and staffing needs for a specific hour."""
+    id: str = Field(default_factory=lambda: f"fc_{uuid.uuid4().hex[:12]}")
+    customer_id: str = ""
+    date: str = ""                 # YYYY-MM-DD
+    hour: int = 0                  # 0-23
+    predicted_volume: int = 0
+    predicted_ai_handled: int = 0
+    predicted_escalations: int = 0
+    recommended_staff: int = 0
+    confidence: float = 0.0        # 0.0-1.0
+
+
+class WorkforceMetrics(BaseModel):
+    """Aggregated workforce performance metrics for a period."""
+    id: str = Field(default_factory=lambda: f"wm_{uuid.uuid4().hex[:12]}")
+    customer_id: str = ""
+    period_start: str = ""         # YYYY-MM-DD
+    period_end: str = ""           # YYYY-MM-DD
+    total_calls: int = 0
+    ai_handled: int = 0
+    human_handled: int = 0
+    containment_rate: float = 0.0  # ai_handled / total_calls
+    avg_wait_time_seconds: float = 0.0
+    avg_handle_time_seconds: float = 0.0
+    escalation_rate: float = 0.0
+    cost_savings_cents: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ROIEstimate(BaseModel):
+    """ROI calculation result."""
+    human_cost_per_month_cents: int = 0
+    ai_cost_per_month_cents: int = 0
+    monthly_savings_cents: int = 0
+    annual_savings_cents: int = 0
+    savings_percentage: float = 0.0
+    calls_per_month: int = 0
+    containment_rate: float = 0.0
+
+
+class WorkforceDashboard(BaseModel):
+    """Combined workforce overview for the dashboard."""
+    active_human_agents: int = 0
+    total_human_agents: int = 0
+    queue_length: int = 0
+    avg_wait_time_seconds: float = 0.0
+    containment_rate: float = 0.0
+    containment_trend: list[dict] = Field(default_factory=list)
+    escalation_rate: float = 0.0
+    cost_savings_this_month_cents: int = 0
+    agents_by_status: dict = Field(default_factory=dict)
+    recent_escalations: list[EscalationQueue] = Field(default_factory=list)
