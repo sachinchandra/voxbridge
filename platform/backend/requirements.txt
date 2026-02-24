@@ -13,3 +13,5 @@ alembic>=1.13
 asyncpg>=0.29
 sqlalchemy>=2.0
 python-dotenv>=1.0
+openai>=1.30
+anthropic>=0.25

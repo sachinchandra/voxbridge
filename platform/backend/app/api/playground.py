@@ -1,21 +1,28 @@
-"""Playground API — test AI agents via text chat in the browser.
+"""Playground API — test AI agents via text chat and voice in the browser.
 
 Endpoints:
     POST /playground/start         Start a new test session
     POST /playground/message       Send a message in a session
+    POST /playground/audio-turn    Send audio, get audio + text back (STT → LLM → TTS)
     POST /playground/end           End a session
     GET  /playground/session/{id}  Get session details
     POST /playground/quick-test    One-shot test (no session needed)
+    GET  /playground/audio-config  Check which audio providers are available
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import base64
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.models.database import PlaygroundResponse
 from app.services import database as db
 from app.services import playground as pg
+from app.services import stt, tts
+from app.config import settings
 from app.middleware.auth import get_current_customer_id
 
 router = APIRouter(prefix="/playground", tags=["playground"])
@@ -224,3 +231,135 @@ async def quick_test(
         latency_ms=result.get("latency_ms", 0),
         tokens_used=result.get("tokens_used", 0),
     )
+
+
+# ── Audio endpoints ─────────────────────────────────────────────
+
+@router.get("/audio-config")
+async def audio_config(customer_id: str = Depends(get_current_customer_id)):
+    """Check which audio providers are configured and available."""
+    return {
+        "stt_available": bool(settings.deepgram_api_key or settings.openai_api_key),
+        "tts_available": bool(settings.openai_api_key or settings.elevenlabs_api_key),
+        "stt_provider": "deepgram" if settings.deepgram_api_key else ("openai" if settings.openai_api_key else "none"),
+        "tts_provider": "openai" if settings.openai_api_key else ("elevenlabs" if settings.elevenlabs_api_key else "none"),
+    }
+
+
+@router.post("/audio-turn")
+async def audio_turn(
+    audio: UploadFile = File(...),
+    session_id: str = Form(...),
+    customer_id: str = Depends(get_current_customer_id),
+):
+    """Complete audio conversation turn: STT → LLM → TTS.
+
+    Accepts audio file from browser mic, transcribes it, feeds text to LLM
+    via the existing playground session, synthesizes the reply to speech,
+    and returns both the text and audio response.
+
+    Request: multipart/form-data with `audio` file and `session_id` field.
+    Response: JSON with transcript, reply text, and base64-encoded audio.
+    """
+    # Validate session
+    session = pg.get_session(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found or expired")
+    if session.customer_id != customer_id:
+        raise HTTPException(403, "Not your session")
+    if session.status != "active":
+        raise HTTPException(400, "Session is no longer active")
+
+    # Load agent config
+    agent = db.get_agent(session.agent_id, customer_id)
+    if not agent:
+        raise HTTPException(404, "Agent no longer exists")
+
+    # 1. Read audio
+    audio_data = await audio.read()
+    if not audio_data or len(audio_data) < 100:
+        raise HTTPException(400, "Audio data too small or empty")
+
+    content_type = audio.content_type or "audio/webm"
+
+    # 2. STT — transcribe audio to text
+    stt_provider = agent.stt_provider or "deepgram"
+    stt_result = await stt.transcribe_audio(
+        audio_data=audio_data,
+        content_type=content_type,
+        provider=stt_provider,
+        config=agent.stt_config or {},
+    )
+
+    if stt_result.get("error"):
+        return JSONResponse(status_code=422, content={
+            "error": "stt_failed",
+            "detail": stt_result["error"],
+            "stt_provider": stt_result.get("provider", "unknown"),
+        })
+
+    transcript = stt_result.get("transcript", "").strip()
+    if not transcript:
+        return JSONResponse(content={
+            "transcript": "",
+            "reply": "",
+            "audio_base64": "",
+            "done": False,
+            "stt_ms": stt_result["duration_ms"],
+            "llm_ms": 0,
+            "tts_ms": 0,
+            "message": "No speech detected in audio",
+        })
+
+    # 3. LLM — process turn (reuse existing text pipeline)
+    agent_config = {
+        "system_prompt": agent.system_prompt,
+        "first_message": agent.first_message,
+        "llm_provider": agent.llm_provider,
+        "llm_model": agent.llm_model,
+        "llm_config": agent.llm_config,
+        "tools": agent.tools,
+        "end_call_phrases": agent.end_call_phrases,
+    }
+
+    llm_result = await pg.process_turn(
+        session=session,
+        user_message=transcript,
+        agent_config=agent_config,
+    )
+
+    reply_text = llm_result.get("reply", "")
+    done = llm_result.get("done", False)
+
+    if done:
+        pg.end_session(session_id)
+
+    # 4. TTS — synthesize reply to audio
+    tts_provider = agent.tts_provider or "openai"
+    tts_result = await tts.synthesize_speech(
+        text=reply_text,
+        provider=tts_provider,
+        voice_id=agent.tts_voice_id or "",
+        config=agent.tts_config or {},
+    )
+
+    # Encode audio as base64 for JSON transport
+    audio_b64 = ""
+    if tts_result.get("audio_data") and not tts_result.get("error"):
+        audio_b64 = base64.b64encode(tts_result["audio_data"]).decode("utf-8")
+
+    return {
+        "transcript": transcript,
+        "reply": reply_text,
+        "audio_base64": audio_b64,
+        "audio_content_type": tts_result.get("content_type", "audio/mpeg"),
+        "done": done,
+        "tool_calls": llm_result.get("tool_calls", []),
+        "tokens_used": llm_result.get("tokens_used", 0),
+        "stt_ms": stt_result.get("duration_ms", 0),
+        "llm_ms": llm_result.get("latency_ms", 0),
+        "tts_ms": tts_result.get("duration_ms", 0),
+        "stt_provider": stt_result.get("provider", "unknown"),
+        "tts_provider": tts_result.get("provider", "unknown"),
+        "tts_error": tts_result.get("error"),
+    }

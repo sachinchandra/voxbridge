@@ -6,7 +6,7 @@ import {
   PhoneNumber, PhoneNumberSearchResult, OutboundCallResponse,
   KnowledgeBase, KBDocument,
   QAScore, QASummary, AnalyticsDetail,
-  PlaygroundStartResponse, PlaygroundResponse, PlaygroundSessionDetail,
+  PlaygroundStartResponse, PlaygroundResponse, PlaygroundSessionDetail, AudioTurnResponse,
   QAReportPreview,
   ConversationFlow, FlowListItem, FlowTestResult,
   AlertRule, AlertItem, AlertSummaryData,
@@ -339,6 +339,22 @@ export const playgroundApi = {
 
   quickTest: async (agentId: string, message: string): Promise<PlaygroundResponse> => {
     const { data } = await api.post('/playground/quick-test', { agent_id: agentId, message });
+    return data;
+  },
+
+  audioConfig: async (): Promise<{ stt_available: boolean; tts_available: boolean; stt_provider: string; tts_provider: string }> => {
+    const { data } = await api.get('/playground/audio-config');
+    return data;
+  },
+
+  audioTurn: async (sessionId: string, audioBlob: Blob): Promise<AudioTurnResponse> => {
+    const formData = new FormData();
+    formData.append('audio', audioBlob, 'recording.webm');
+    formData.append('session_id', sessionId);
+    const { data } = await api.post('/playground/audio-turn', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 30000,
+    });
     return data;
   },
 };

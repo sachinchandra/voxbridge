@@ -333,6 +333,25 @@ export interface PlaygroundSessionDetail {
   ended_at: string | null;
 }
 
+// ── Audio Playground ────────────────────────────────────────────
+
+export interface AudioTurnResponse {
+  transcript: string;
+  reply: string;
+  audio_base64: string;
+  audio_content_type: string;
+  done: boolean;
+  tool_calls: { name: string; arguments: string }[];
+  tokens_used: number;
+  stt_ms: number;
+  llm_ms: number;
+  tts_ms: number;
+  stt_provider: string;
+  tts_provider: string;
+  tts_error?: string;
+  message?: string;
+}
+
 // ── QA Report ──────────────────────────────────────────────────
 
 export interface QAReportPreview {
