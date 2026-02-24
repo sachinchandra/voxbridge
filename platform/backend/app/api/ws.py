@@ -17,7 +17,6 @@ from loguru import logger
 
 from app.services.auth import decode_token
 from app.services import event_bus, ws_manager
-from app.services.database import get_customer
 
 router = APIRouter()
 
@@ -26,14 +25,17 @@ async def _authenticate_ws(token: str) -> str | None:
     """Validate JWT and return customer_id, or None."""
     try:
         payload = decode_token(token)
-        if not payload or "sub" not in payload:
+        if not payload:
+            logger.warning("WS auth: token decode returned None")
+            return None
+        if "sub" not in payload:
+            logger.warning(f"WS auth: no 'sub' in payload, keys={list(payload.keys())}")
             return None
         customer_id = payload["sub"]
-        customer = get_customer(customer_id)
-        if not customer:
-            return None
+        logger.info(f"WS auth: token valid for customer={customer_id}")
         return customer_id
-    except Exception:
+    except Exception as e:
+        logger.error(f"WS auth error: {type(e).__name__}: {e}")
         return None
 
 
