@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     # App
     app_name: str = "VoxBridge"
     api_url: str = "http://localhost:8000"
-    frontend_url: str = "http://localhost:3000"
-    cors_origins: str = "http://localhost:3000,http://localhost:5173"
+    frontend_url: str = "https://app.voxbridge.in"
+    cors_origins: str = "https://app.voxbridge.in,https://voxbridge-dashboard.onrender.com,http://localhost:3000,http://localhost:5173"
     debug: bool = False
 
     # Supabase

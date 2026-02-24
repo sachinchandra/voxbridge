@@ -12,7 +12,8 @@ export interface WSEvent {
 type EventCallback = (event: WSEvent) => void;
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-const WS_URL = API_URL.replace(/^http/, 'ws') + '/api/v1/ws/events';
+const WS_BASE = process.env.REACT_APP_WS_URL || API_URL.replace(/^http/, 'ws');
+const WS_URL = WS_BASE + '/api/v1/ws/events';
 
 const RECONNECT_BASE = 1000;
 const RECONNECT_MAX = 30000;

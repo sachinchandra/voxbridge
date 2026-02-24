@@ -1,13 +1,16 @@
 # Render Blueprint - Deploy VoxBridge Platform
 # https://render.com/docs/blueprint-spec
 #
-# To deploy:
-#   1. Go to https://dashboard.render.com
-#   2. New → Blueprint Instance → connect sachinchandra/voxbridge
-#   3. Or update existing voxbridge-api service to point to this repo
-#      with Root Directory = platform/backend
+# Custom Domains:
+#   Frontend: app.voxbridge.in  → voxbridge-dashboard static site
+#   Backend:  api.voxbridge.in  → voxbridge-api web service
+#
+# DNS Setup (GoDaddy → Render):
+#   app  CNAME  → <render-static-site-host>.onrender.com
+#   api  CNAME  → <render-web-service-host>.onrender.com
 
 services:
+  # ── Backend API ─────────────────────────────────────────────────
   - type: web
     name: voxbridge-api
     runtime: python
@@ -34,8 +37,32 @@ services:
       - key: STRIPE_PRICE_ENTERPRISE
         sync: false
       - key: FRONTEND_URL
-        sync: false
+        value: "https://app.voxbridge.in"
       - key: CORS_ORIGINS
-        sync: false
+        value: "https://app.voxbridge.in,https://voxbridge-dashboard.onrender.com,http://localhost:3000,http://localhost:5173"
     healthCheckPath: /health
     plan: free
+
+  # ── Frontend Dashboard (Static Site) ────────────────────────────
+  - type: web
+    name: voxbridge-dashboard
+    runtime: static
+    rootDir: platform/frontend/dashboard
+    buildCommand: npm install && npm run build
+    staticPublishPath: build
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache
+      - path: /static/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: REACT_APP_API_URL
+        value: "https://api.voxbridge.in"
+      - key: REACT_APP_WS_URL
+        value: "wss://api.voxbridge.in"
