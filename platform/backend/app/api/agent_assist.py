@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from app.models.database import AssistSession
 from app.services import agent_assist as assist_svc
-from app.middleware.auth import get_current_customer
+from app.middleware.auth import get_current_customer_id
 
 router = APIRouter(prefix="/agent-assist", tags=["agent-assist"])
 
@@ -44,7 +44,7 @@ class TranscriptEntryRequest(BaseModel):
 @router.post("/sessions")
 async def start_session(
     req: StartSessionRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Start a new Agent Assist session for a live call."""
     session = AssistSession(
@@ -60,7 +60,7 @@ async def start_session(
 @router.get("/sessions")
 async def list_sessions(
     active_only: bool = False,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """List all assist sessions."""
     sessions = assist_svc.list_sessions(customer_id, active_only)
@@ -83,7 +83,7 @@ async def list_sessions(
 @router.get("/sessions/{session_id}")
 async def get_session(
     session_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Get full session details including transcript and suggestions."""
     session = assist_svc.get_session(session_id)
@@ -95,7 +95,7 @@ async def get_session(
 @router.post("/sessions/{session_id}/end")
 async def end_session(
     session_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """End a session and generate call summary + next steps."""
     session = assist_svc.get_session(session_id)
@@ -119,7 +119,7 @@ async def end_session(
 @router.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Delete a session."""
     session = assist_svc.get_session(session_id)
@@ -135,7 +135,7 @@ async def delete_session(
 async def add_transcript(
     session_id: str,
     req: TranscriptEntryRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Add a transcript entry and get real-time suggestions back.
 
@@ -158,7 +158,7 @@ async def add_transcript(
 async def accept_suggestion(
     session_id: str,
     suggestion_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Mark a suggestion as accepted (used by the agent)."""
     session = assist_svc.get_session(session_id)
@@ -175,7 +175,7 @@ async def accept_suggestion(
 async def dismiss_suggestion(
     session_id: str,
     suggestion_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Mark a suggestion as dismissed (not useful)."""
     session = assist_svc.get_session(session_id)
@@ -191,7 +191,7 @@ async def dismiss_suggestion(
 # -- Summary -----------------------------------------------------------------
 
 @router.get("/summary")
-async def get_summary(customer_id: str = Depends(get_current_customer)):
+async def get_summary(customer_id: str = Depends(get_current_customer_id)):
     """Get aggregate Agent Assist statistics."""
     summary = assist_svc.get_assist_summary(customer_id)
     return summary.model_dump()

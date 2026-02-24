@@ -41,3 +41,10 @@ async def get_current_customer(
         )
 
     return customer
+
+
+async def get_current_customer_id(
+    customer: Customer = Depends(get_current_customer),
+) -> str:
+    """FastAPI dependency: returns just the customer ID string from JWT."""
+    return customer.id

@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from app.models.database import AlertRule, AlertType, AlertSeverity
 from app.services import alerts as alert_svc
-from app.middleware.auth import get_current_customer
+from app.middleware.auth import get_current_customer_id
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -55,7 +55,7 @@ class EvaluateRequest(BaseModel):
 @router.post("/rules")
 async def create_rule(
     req: CreateRuleRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Create a new alert rule."""
     rule = AlertRule(
@@ -73,7 +73,7 @@ async def create_rule(
 
 
 @router.get("/rules")
-async def list_rules(customer_id: str = Depends(get_current_customer)):
+async def list_rules(customer_id: str = Depends(get_current_customer_id)):
     """List all alert rules."""
     rules = alert_svc.list_rules(customer_id)
     return [r.model_dump() for r in rules]
@@ -83,7 +83,7 @@ async def list_rules(customer_id: str = Depends(get_current_customer)):
 async def update_rule(
     rule_id: str,
     req: UpdateRuleRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Update an alert rule."""
     rule = alert_svc.get_rule(rule_id)
@@ -100,7 +100,7 @@ async def update_rule(
 @router.delete("/rules/{rule_id}")
 async def delete_rule(
     rule_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Delete an alert rule."""
     rule = alert_svc.get_rule(rule_id)
@@ -111,7 +111,7 @@ async def delete_rule(
 
 
 @router.post("/rules/defaults")
-async def create_default_rules(customer_id: str = Depends(get_current_customer)):
+async def create_default_rules(customer_id: str = Depends(get_current_customer_id)):
     """Create a set of sensible default alert rules."""
     rules = alert_svc.create_default_rules(customer_id)
     return {"created": len(rules), "rules": [r.model_dump() for r in rules]}
@@ -124,7 +124,7 @@ async def list_alerts(
     unacknowledged: bool = False,
     severity: str | None = None,
     limit: int = 50,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """List triggered alerts."""
     alerts = alert_svc.list_alerts(customer_id, unacknowledged, severity, limit)
@@ -132,7 +132,7 @@ async def list_alerts(
 
 
 @router.get("/summary")
-async def get_summary(customer_id: str = Depends(get_current_customer)):
+async def get_summary(customer_id: str = Depends(get_current_customer_id)):
     """Get alert summary with counts by severity."""
     summary = alert_svc.get_alert_summary(customer_id)
     return summary.model_dump()
@@ -141,7 +141,7 @@ async def get_summary(customer_id: str = Depends(get_current_customer)):
 @router.post("/{alert_id}/acknowledge")
 async def acknowledge_alert(
     alert_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Acknowledge a single alert."""
     alert = alert_svc.get_alert(alert_id)
@@ -152,7 +152,7 @@ async def acknowledge_alert(
 
 
 @router.post("/acknowledge-all")
-async def acknowledge_all(customer_id: str = Depends(get_current_customer)):
+async def acknowledge_all(customer_id: str = Depends(get_current_customer_id)):
     """Acknowledge all unacknowledged alerts."""
     count = alert_svc.acknowledge_all(customer_id)
     return {"acknowledged": count}
@@ -161,7 +161,7 @@ async def acknowledge_all(customer_id: str = Depends(get_current_customer)):
 @router.post("/evaluate")
 async def evaluate_rules(
     req: EvaluateRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Manually evaluate all rules against provided metrics."""
     triggered = alert_svc.evaluate_all_rules(customer_id, req.metrics)

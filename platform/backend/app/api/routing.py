@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from app.models.database import Department, RoutingRule
 from app.services import intent_router as router_svc
-from app.middleware.auth import get_current_customer
+from app.middleware.auth import get_current_customer_id
 
 router = APIRouter(prefix="/routing", tags=["routing"])
 
@@ -71,7 +71,7 @@ class ClassifyRequest(BaseModel):
 @router.post("/departments")
 async def create_department(
     req: CreateDepartmentRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Create a new department."""
     dept = Department(
@@ -90,7 +90,7 @@ async def create_department(
 
 
 @router.get("/departments")
-async def list_departments(customer_id: str = Depends(get_current_customer)):
+async def list_departments(customer_id: str = Depends(get_current_customer_id)):
     """List all departments sorted by priority."""
     depts = router_svc.list_departments(customer_id)
     return [d.model_dump() for d in depts]
@@ -99,7 +99,7 @@ async def list_departments(customer_id: str = Depends(get_current_customer)):
 @router.get("/departments/{dept_id}")
 async def get_department(
     dept_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Get a single department."""
     dept = router_svc.get_department(dept_id)
@@ -112,7 +112,7 @@ async def get_department(
 async def update_department(
     dept_id: str,
     req: UpdateDepartmentRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Update a department."""
     dept = router_svc.get_department(dept_id)
@@ -127,7 +127,7 @@ async def update_department(
 @router.delete("/departments/{dept_id}")
 async def delete_department(
     dept_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Delete a department."""
     dept = router_svc.get_department(dept_id)
@@ -138,7 +138,7 @@ async def delete_department(
 
 
 @router.post("/departments/defaults")
-async def create_default_departments(customer_id: str = Depends(get_current_customer)):
+async def create_default_departments(customer_id: str = Depends(get_current_customer_id)):
     """Create default departments (Sales, Support, Billing)."""
     depts = router_svc.create_default_departments(customer_id)
     return {"created": len(depts), "departments": [d.model_dump() for d in depts]}
@@ -149,7 +149,7 @@ async def create_default_departments(customer_id: str = Depends(get_current_cust
 @router.post("/rules")
 async def create_rule(
     req: CreateRuleRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Create a routing rule."""
     rule = RoutingRule(
@@ -166,7 +166,7 @@ async def create_rule(
 
 
 @router.get("/rules")
-async def list_rules(customer_id: str = Depends(get_current_customer)):
+async def list_rules(customer_id: str = Depends(get_current_customer_id)):
     """List all routing rules sorted by priority."""
     rules = router_svc.list_rules(customer_id)
     return [r.model_dump() for r in rules]
@@ -175,7 +175,7 @@ async def list_rules(customer_id: str = Depends(get_current_customer)):
 @router.delete("/rules/{rule_id}")
 async def delete_rule(
     rule_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Delete a routing rule."""
     rule = router_svc.get_rule(rule_id)
@@ -190,7 +190,7 @@ async def delete_rule(
 @router.post("/classify")
 async def classify_call(
     req: ClassifyRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Classify caller intent and return routing result."""
     result = router_svc.route_call(req.text, customer_id, req.dtmf_input)
@@ -198,7 +198,7 @@ async def classify_call(
 
 
 @router.get("/config")
-async def get_routing_config(customer_id: str = Depends(get_current_customer)):
+async def get_routing_config(customer_id: str = Depends(get_current_customer_id)):
     """Get a summary of the routing configuration."""
     depts = router_svc.list_departments(customer_id)
     rules = router_svc.list_rules(customer_id)

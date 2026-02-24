@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from app.models.database import ConversationFlow, FlowNode, FlowEdge
 from app.services import flow_engine as fe
-from app.middleware.auth import get_current_customer
+from app.middleware.auth import get_current_customer_id
 
 router = APIRouter(prefix="/flows", tags=["flows"])
 
@@ -56,7 +56,7 @@ class CreateVersionRequest(BaseModel):
 @router.post("")
 async def create_flow(
     req: CreateFlowRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Create a new conversation flow."""
     nodes = [FlowNode(**n) for n in req.nodes] if req.nodes else []
@@ -75,7 +75,7 @@ async def create_flow(
 
 
 @router.get("")
-async def list_flows(customer_id: str = Depends(get_current_customer)):
+async def list_flows(customer_id: str = Depends(get_current_customer_id)):
     """List all conversation flows."""
     flows = fe.list_flows(customer_id)
     return [
@@ -96,7 +96,7 @@ async def list_flows(customer_id: str = Depends(get_current_customer)):
 
 
 @router.get("/{flow_id}")
-async def get_flow(flow_id: str, customer_id: str = Depends(get_current_customer)):
+async def get_flow(flow_id: str, customer_id: str = Depends(get_current_customer_id)):
     """Get full flow details including nodes and edges."""
     flow = fe.get_flow(flow_id)
     if not flow or flow.customer_id != customer_id:
@@ -108,7 +108,7 @@ async def get_flow(flow_id: str, customer_id: str = Depends(get_current_customer
 async def update_flow(
     flow_id: str,
     req: UpdateFlowRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Update a flow's name, description, nodes, or edges."""
     flow = fe.get_flow(flow_id)
@@ -130,7 +130,7 @@ async def update_flow(
 
 
 @router.delete("/{flow_id}")
-async def delete_flow(flow_id: str, customer_id: str = Depends(get_current_customer)):
+async def delete_flow(flow_id: str, customer_id: str = Depends(get_current_customer_id)):
     """Delete a conversation flow."""
     flow = fe.get_flow(flow_id)
     if not flow or flow.customer_id != customer_id:
@@ -140,7 +140,7 @@ async def delete_flow(flow_id: str, customer_id: str = Depends(get_current_custo
 
 
 @router.post("/{flow_id}/activate")
-async def activate_flow(flow_id: str, customer_id: str = Depends(get_current_customer)):
+async def activate_flow(flow_id: str, customer_id: str = Depends(get_current_customer_id)):
     """Set a flow as the active flow for its agent."""
     flow = fe.get_flow(flow_id)
     if not flow or flow.customer_id != customer_id:
@@ -164,7 +164,7 @@ async def activate_flow(flow_id: str, customer_id: str = Depends(get_current_cus
 async def test_flow(
     flow_id: str,
     req: TestFlowRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Simulate executing a flow with test inputs."""
     flow = fe.get_flow(flow_id)
@@ -179,7 +179,7 @@ async def test_flow(
 async def create_version(
     flow_id: str,
     req: CreateVersionRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Create a versioned snapshot of the current flow for A/B testing."""
     flow = fe.get_flow(flow_id)
@@ -200,7 +200,7 @@ async def create_version(
 
 
 @router.get("/{flow_id}/versions")
-async def list_versions(flow_id: str, customer_id: str = Depends(get_current_customer)):
+async def list_versions(flow_id: str, customer_id: str = Depends(get_current_customer_id)):
     """List all versions of a flow."""
     flow = fe.get_flow(flow_id)
     if not flow or flow.customer_id != customer_id:
@@ -213,7 +213,7 @@ async def list_versions(flow_id: str, customer_id: str = Depends(get_current_cus
 @router.post("/default")
 async def create_default(
     req: CreateFlowRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Create a default starter flow for quick setup."""
     flow = fe.create_default_flow(customer_id, req.agent_id, req.name)

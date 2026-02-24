@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from app.models.database import PlaygroundResponse
 from app.services import database as db
 from app.services import playground as pg
-from app.middleware.auth import get_current_customer
+from app.middleware.auth import get_current_customer_id
 
 router = APIRouter(prefix="/playground", tags=["playground"])
 
@@ -42,7 +42,7 @@ class QuickTestRequest(BaseModel):
 @router.post("/start")
 async def start_session(
     req: StartRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Start a new playground test session with an agent."""
     agent = db.get_agent(req.agent_id, customer_id)
@@ -78,7 +78,7 @@ async def start_session(
 @router.post("/message", response_model=PlaygroundResponse)
 async def send_message(
     req: MessageRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Send a message in an active playground session."""
     session = pg.get_session(req.session_id)
@@ -126,7 +126,7 @@ async def send_message(
 @router.post("/end/{session_id}")
 async def end_session(
     session_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """End a playground session."""
     session = pg.get_session(session_id)
@@ -148,7 +148,7 @@ async def end_session(
 @router.get("/session/{session_id}")
 async def get_session(
     session_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Get playground session details."""
     session = pg.get_session(session_id)
@@ -183,7 +183,7 @@ async def get_session(
 @router.post("/quick-test", response_model=PlaygroundResponse)
 async def quick_test(
     req: QuickTestRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """One-shot test — send a single message to an agent without creating a persistent session."""
     agent = db.get_agent(req.agent_id, customer_id)

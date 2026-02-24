@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from app.models.database import AuditAction, ComplianceRule, ComplianceRuleType
 from app.services import compliance as comp_svc
-from app.middleware.auth import get_current_customer
+from app.middleware.auth import get_current_customer_id
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
@@ -69,7 +69,7 @@ class LogActionRequest(BaseModel):
 @router.post("/rules")
 async def create_rule(
     req: CreateRuleRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Create a compliance rule."""
     rule = ComplianceRule(
@@ -85,7 +85,7 @@ async def create_rule(
 
 
 @router.get("/rules")
-async def list_rules(customer_id: str = Depends(get_current_customer)):
+async def list_rules(customer_id: str = Depends(get_current_customer_id)):
     """List all compliance rules."""
     rules = comp_svc.list_rules(customer_id)
     return [r.model_dump() for r in rules]
@@ -95,7 +95,7 @@ async def list_rules(customer_id: str = Depends(get_current_customer)):
 async def update_rule(
     rule_id: str,
     req: UpdateRuleRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Update a compliance rule."""
     rule = comp_svc.get_rule(rule_id)
@@ -109,7 +109,7 @@ async def update_rule(
 @router.delete("/rules/{rule_id}")
 async def delete_rule(
     rule_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Delete a compliance rule."""
     rule = comp_svc.get_rule(rule_id)
@@ -120,7 +120,7 @@ async def delete_rule(
 
 
 @router.post("/rules/defaults")
-async def create_default_rules(customer_id: str = Depends(get_current_customer)):
+async def create_default_rules(customer_id: str = Depends(get_current_customer_id)):
     """Create a standard compliance rule set."""
     rules = comp_svc.create_default_rules(customer_id)
     return {"created": len(rules), "rules": [r.model_dump() for r in rules]}
@@ -131,7 +131,7 @@ async def create_default_rules(customer_id: str = Depends(get_current_customer))
 @router.post("/scan")
 async def scan_transcript(
     req: ScanRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Scan a call transcript for compliance violations."""
     violations = comp_svc.scan_transcript(customer_id, req.call_id, req.transcript)
@@ -148,7 +148,7 @@ async def list_violations(
     unresolved_only: bool = False,
     rule_type: str = "",
     limit: int = 50,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """List compliance violations."""
     violations = comp_svc.list_violations(customer_id, unresolved_only, rule_type, limit)
@@ -158,7 +158,7 @@ async def list_violations(
 @router.post("/violations/{violation_id}/resolve")
 async def resolve_violation(
     violation_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Mark a violation as resolved."""
     v = comp_svc.get_violation(violation_id)
@@ -173,7 +173,7 @@ async def resolve_violation(
 @router.post("/redact")
 async def redact_text(
     req: RedactRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Redact PII from text."""
     redacted = comp_svc.redact_text(req.text)
@@ -183,7 +183,7 @@ async def redact_text(
 # -- Summary ------------------------------------------------------------------
 
 @router.get("/summary")
-async def get_summary(customer_id: str = Depends(get_current_customer)):
+async def get_summary(customer_id: str = Depends(get_current_customer_id)):
     """Get compliance overview."""
     summary = comp_svc.get_compliance_summary(customer_id)
     return summary.model_dump()
@@ -195,7 +195,7 @@ async def get_summary(customer_id: str = Depends(get_current_customer)):
 async def get_audit_log(
     action: str = "",
     limit: int = 50,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Get audit log entries."""
     entries = comp_svc.get_audit_log(customer_id, action, limit)
@@ -205,7 +205,7 @@ async def get_audit_log(
 @router.post("/audit-log")
 async def log_action(
     req: LogActionRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Manually log an audit action."""
     entry = comp_svc.log_action(

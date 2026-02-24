@@ -11,7 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.services import database as db
-from app.middleware.auth import get_current_customer
+from app.middleware.auth import get_current_customer_id
 from app.services.qa_email import generate_weekly_report, render_email_html, send_weekly_report
 
 router = APIRouter(prefix="/qa-reports", tags=["qa-reports"])
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/qa-reports", tags=["qa-reports"])
 
 @router.post("/send")
 async def send_weekly_report_endpoint(
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Send a weekly QA report email for the current customer."""
     customer = db.get_customer(customer_id)
@@ -49,7 +49,7 @@ async def send_weekly_report_endpoint(
 
 @router.get("/preview")
 async def preview_report(
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Preview the weekly QA report email HTML (for debugging/testing)."""
     customer = db.get_customer(customer_id)

@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from app.models.database import Connector, ConnectorType, ConnectorStatus
 from app.services import connectors as conn_svc
-from app.middleware.auth import get_current_customer
+from app.middleware.auth import get_current_customer_id
 
 router = APIRouter(prefix="/connectors", tags=["connectors"])
 
@@ -55,7 +55,7 @@ class RouteCallRequest(BaseModel):
 @router.post("")
 async def create_connector(
     req: CreateConnectorRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Create a new contact center connector."""
     conn = Connector(
@@ -70,7 +70,7 @@ async def create_connector(
 
 
 @router.get("")
-async def list_connectors(customer_id: str = Depends(get_current_customer)):
+async def list_connectors(customer_id: str = Depends(get_current_customer_id)):
     """List all connectors for the current customer."""
     connectors = conn_svc.list_connectors(customer_id)
     return [c.model_dump() for c in connectors]
@@ -79,7 +79,7 @@ async def list_connectors(customer_id: str = Depends(get_current_customer)):
 @router.get("/{connector_id}")
 async def get_connector(
     connector_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Get a single connector."""
     conn = conn_svc.get_connector(connector_id)
@@ -92,7 +92,7 @@ async def get_connector(
 async def update_connector(
     connector_id: str,
     req: UpdateConnectorRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Update connector settings."""
     conn = conn_svc.get_connector(connector_id)
@@ -107,7 +107,7 @@ async def update_connector(
 @router.delete("/{connector_id}")
 async def delete_connector(
     connector_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Delete a connector."""
     conn = conn_svc.get_connector(connector_id)
@@ -122,7 +122,7 @@ async def delete_connector(
 @router.post("/{connector_id}/activate")
 async def activate_connector(
     connector_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Activate a connector (validates config and connects)."""
     conn = conn_svc.get_connector(connector_id)
@@ -138,7 +138,7 @@ async def activate_connector(
 @router.post("/{connector_id}/deactivate")
 async def deactivate_connector(
     connector_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Deactivate a connector."""
     conn = conn_svc.get_connector(connector_id)
@@ -154,7 +154,7 @@ async def deactivate_connector(
 @router.get("/{connector_id}/health")
 async def get_health(
     connector_id: str,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Get connector health status."""
     conn = conn_svc.get_connector(connector_id)
@@ -167,7 +167,7 @@ async def get_health(
 async def list_events(
     connector_id: str,
     limit: int = 50,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """List connector events (audit trail)."""
     conn = conn_svc.get_connector(connector_id)
@@ -183,7 +183,7 @@ async def list_events(
 async def map_queue(
     connector_id: str,
     req: MapQueueRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Map an external queue/skill to a VoxBridge department."""
     conn = conn_svc.get_connector(connector_id)
@@ -200,7 +200,7 @@ async def map_queue(
 async def route_call(
     connector_id: str,
     req: RouteCallRequest,
-    customer_id: str = Depends(get_current_customer),
+    customer_id: str = Depends(get_current_customer_id),
 ):
     """Route an incoming call from an external platform."""
     conn = conn_svc.get_connector(connector_id)
