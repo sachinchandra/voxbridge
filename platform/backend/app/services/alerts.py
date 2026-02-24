@@ -28,6 +28,7 @@ from app.models.database import (
     AlertSummary,
     AlertType,
 )
+from app.services import event_bus
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -84,6 +85,11 @@ def create_alert(alert: Alert) -> Alert:
         del _alerts[oldest_key]
     _alerts[alert.id] = alert
     logger.warning(f"ALERT [{alert.severity}]: {alert.title}")
+    event_bus.publish(alert.customer_id, event_bus.EventType.ALERT_FIRED, {
+        "alert_id": alert.id, "title": alert.title,
+        "severity": alert.severity, "alert_type": alert.alert_type,
+        "message": alert.message,
+    })
     return alert
 
 

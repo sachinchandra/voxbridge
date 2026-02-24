@@ -16,6 +16,7 @@ import {
   ComplianceRuleItem, ComplianceViolationItem, ComplianceSummaryData, AuditLogEntryItem,
   HumanAgentItem, EscalationItem, StaffingForecastItem, ROIEstimateItem,
   WorkforceDashboardData, QueueStatusData,
+  LiveSnapshot, LiveEvent, ActiveCallItem, AgentPresenceItem,
 } from '../types';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -752,6 +753,30 @@ export const workforceApi = {
 
   getDashboard: async (): Promise<WorkforceDashboardData> => {
     const { data } = await api.get('/workforce/dashboard');
+    return data;
+  },
+};
+
+// -- Live Monitoring ---------------------------------------------------------
+
+export const liveApi = {
+  getDashboard: async (): Promise<LiveSnapshot> => {
+    const { data } = await api.get('/live/dashboard');
+    return data;
+  },
+
+  getEvents: async (params?: { since?: string; limit?: number }): Promise<LiveEvent[]> => {
+    const { data } = await api.get('/live/events', { params });
+    return data;
+  },
+
+  getActiveCalls: async (): Promise<ActiveCallItem[]> => {
+    const { data } = await api.get('/live/active-calls');
+    return data;
+  },
+
+  getAgentPresence: async (): Promise<AgentPresenceItem[]> => {
+    const { data } = await api.get('/live/agent-presence');
     return data;
   },
 };

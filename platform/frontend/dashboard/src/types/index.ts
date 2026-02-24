@@ -744,6 +744,52 @@ export interface QueueStatusData {
   longest_waiting_seconds: number;
 }
 
+// -- Live Monitoring ---------------------------------------------------------
+
+export interface LiveEvent {
+  type: string;
+  customer_id: string;
+  payload: Record<string, any>;
+  timestamp: string;
+}
+
+export interface LiveSnapshot {
+  active_calls: number;
+  calls_today: number;
+  ai_contained_today: number;
+  escalated_today: number;
+  containment_rate: number;
+  active_agents: number;
+  total_agents: number;
+  queue_depth: number;
+  avg_wait_seconds: number;
+  calls_per_minute: number;
+  ws_connections: number;
+  recent_events: LiveEvent[];
+  timestamp: string;
+}
+
+export interface ActiveCallItem {
+  call_id: string;
+  agent_name: string;
+  direction: string;
+  from_number: string;
+  to_number: string;
+  started_at: string;
+  status: string;
+  duration_seconds: number;
+}
+
+export interface AgentPresenceItem {
+  id: string;
+  name: string;
+  status: string;
+  department_id: string;
+  current_call_id: string | null;
+  calls_handled_today: number;
+  busy_minutes_today: number;
+}
+
 export interface AnalyticsDetail {
   total_calls: number;
   ai_handled: number;

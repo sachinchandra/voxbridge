@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { WebSocketProvider } from './context/WebSocketContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
@@ -24,6 +25,7 @@ import Connectors from './pages/Connectors';
 import AgentAssist from './pages/AgentAssist';
 import Compliance from './pages/Compliance';
 import Workforce from './pages/Workforce';
+import LiveMonitor from './pages/LiveMonitor';
 import QuickStart from './pages/QuickStart';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -72,7 +74,9 @@ function App() {
             path="/dashboard"
             element={
               <ProtectedRoute>
-                <Layout />
+                <WebSocketProvider>
+                  <Layout />
+                </WebSocketProvider>
               </ProtectedRoute>
             }
           >
@@ -93,6 +97,7 @@ function App() {
             <Route path="agent-assist" element={<AgentAssist />} />
             <Route path="compliance" element={<Compliance />} />
             <Route path="workforce" element={<Workforce />} />
+            <Route path="live" element={<LiveMonitor />} />
             <Route path="quickstart" element={<QuickStart />} />
             <Route path="keys" element={<ApiKeys />} />
             <Route path="usage" element={<Usage />} />

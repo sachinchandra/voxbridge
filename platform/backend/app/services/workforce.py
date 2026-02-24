@@ -20,6 +20,7 @@ from app.models.database import (
     ROIEstimate,
     WorkforceDashboard,
 )
+from app.services import event_bus
 
 # ── In-memory stores ──────────────────────────────────────────────
 
@@ -73,9 +74,15 @@ def set_agent_status(agent_id: str, status: HumanAgentStatus) -> HumanAgent | No
     agent = _human_agents.get(agent_id)
     if not agent:
         return None
+    old_status = agent.status
     agent.status = status
     if status == HumanAgentStatus.OFFLINE:
         agent.current_call_id = None
+    # Emit event
+    event_bus.publish(agent.customer_id, event_bus.EventType.AGENT_STATUS_CHANGED, {
+        "agent_id": agent.id, "agent_name": agent.name,
+        "old_status": old_status, "new_status": status,
+    })
     return agent
 
 
@@ -101,6 +108,10 @@ def get_agent_utilization(agent_id: str) -> float:
 def enqueue_escalation(customer_id: str, **kwargs) -> EscalationQueue:
     esc = EscalationQueue(customer_id=customer_id, **kwargs)
     _escalations[esc.id] = esc
+    event_bus.publish(customer_id, event_bus.EventType.ESCALATION_CREATED, {
+        "escalation_id": esc.id, "call_id": esc.call_id,
+        "priority": esc.priority, "reason": esc.reason,
+    })
     return esc
 
 
@@ -136,6 +147,10 @@ def assign_escalation(esc_id: str, human_agent_id: str) -> EscalationQueue | Non
     # Mark agent busy
     agent.status = HumanAgentStatus.BUSY
     agent.current_call_id = esc.call_id
+    event_bus.publish(esc.customer_id, event_bus.EventType.ESCALATION_ASSIGNED, {
+        "escalation_id": esc.id, "agent_id": agent.id, "agent_name": agent.name,
+        "wait_time_seconds": esc.wait_time_seconds,
+    })
     return esc
 
 
@@ -174,6 +189,9 @@ def resolve_escalation(esc_id: str) -> EscalationQueue | None:
             agent.current_call_id = None
             agent.calls_handled_today += 1
             agent.busy_minutes_today += esc.handle_time_seconds / 60.0
+    event_bus.publish(esc.customer_id, event_bus.EventType.ESCALATION_RESOLVED, {
+        "escalation_id": esc.id, "handle_time_seconds": esc.handle_time_seconds,
+    })
     return esc
 
 

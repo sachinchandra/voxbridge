@@ -1,9 +1,11 @@
 import React from 'react';
 import { Link, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useWS } from '../context/WebSocketContext';
 
 const navItems = [
   { path: '/dashboard', label: 'Overview', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6', section: 'main' },
+  { path: '/dashboard/live', label: 'Live Monitor', icon: 'M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728M9.172 15.828a5 5 0 010-7.072m5.656 0a5 5 0 010 7.072M13 12a1 1 0 11-2 0 1 1 0 012 0z', section: 'main' },
   { path: '/dashboard/agents', label: 'AI Agents', icon: 'M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z', section: 'main' },
   { path: '/dashboard/calls', label: 'Call Logs', icon: 'M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z', section: 'main' },
   { path: '/dashboard/phone-numbers', label: 'Phone Numbers', icon: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 10-6 0 3 3 0 006 0z', section: 'main' },
@@ -27,6 +29,7 @@ const navItems = [
 export default function Layout() {
   const { customer, logout } = useAuth();
   const location = useLocation();
+  const { status: wsStatus } = useWS();
 
   const planColors: Record<string, string> = {
     free: 'bg-gray-600',
@@ -109,6 +112,12 @@ export default function Layout() {
               <span className={`inline-block px-2 py-0.5 text-xs rounded-full text-white ${planColors[customer?.plan || 'free']}`}>
                 {customer?.plan?.toUpperCase()}
               </span>
+            </div>
+          </div>
+          <div className="flex items-center justify-between px-3 py-1 mb-1">
+            <div className="flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${wsStatus === 'connected' ? 'bg-green-400 animate-pulse' : wsStatus === 'connecting' ? 'bg-amber-400' : 'bg-gray-600'}`} />
+              <span className="text-[10px] text-gray-500">{wsStatus === 'connected' ? 'Live' : wsStatus === 'connecting' ? 'Connecting' : 'Offline'}</span>
             </div>
           </div>
           <button
