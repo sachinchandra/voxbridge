@@ -95,6 +95,10 @@ def get_customer_by_id(customer_id: str) -> Customer | None:
     return None
 
 
+# Alias for convenience
+get_customer = get_customer_by_id
+
+
 def update_customer_plan(customer_id: str, plan: PlanTier) -> Customer | None:
     """Update a customer's plan tier."""
     client = get_client()
