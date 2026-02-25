@@ -143,7 +143,9 @@ async def _run_with_deepgram_streaming(ws: WebSocket, session, agent, agent_conf
         f"&encoding=linear16&sample_rate=16000&channels=1"
     )
 
-    headers = {"Authorization": f"Token {settings.deepgram_api_key}"}
+    dg_key = settings.deepgram_api_key.strip()
+    logger.info(f"Deepgram key: {dg_key[:8]}...{dg_key[-4:]} (len={len(dg_key)})")
+    headers = {"Authorization": f"Token {dg_key}"}
     processing_lock = asyncio.Lock()
     utterance_buffer = ""
 
