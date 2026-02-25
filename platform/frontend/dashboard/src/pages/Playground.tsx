@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { agentsApi, playgroundApi } from '../services/api';
 import { AgentListItem, PlaygroundMessage } from '../types';
-import { usePlaygroundCall, CallStatus } from '../hooks/usePlaygroundCall';
+import { usePlaygroundCall, CallStatus, CallLog } from '../hooks/usePlaygroundCall';
 
 type PlaygroundMode = 'text' | 'voice';
 
@@ -55,6 +55,62 @@ function Waveform({ active }: { active: boolean }) {
   );
 }
 
+const LOG_COLORS: Record<CallLog['level'], string> = {
+  info: 'text-gray-400',
+  warn: 'text-yellow-400',
+  error: 'text-red-400',
+  audio: 'text-blue-400',
+  ws: 'text-cyan-400',
+};
+
+function LiveLogPanel({ logs, show, onToggle }: { logs: CallLog[]; show: boolean; onToggle: () => void }) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (show) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs, show]);
+
+  return (
+    <div className="mt-4">
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-2 text-xs text-gray-500 hover:text-gray-300 transition-colors mb-2"
+      >
+        <svg className={`w-3 h-3 transition-transform ${show ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20">
+          <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+        </svg>
+        Live Logs ({logs.length})
+        {logs.filter(l => l.level === 'error').length > 0 && (
+          <span className="px-1.5 py-0.5 text-[10px] bg-red-900/50 text-red-400 rounded">
+            {logs.filter(l => l.level === 'error').length} errors
+          </span>
+        )}
+      </button>
+      {show && (
+        <div className="bg-[#0a0718] border border-vox-900/50 rounded-lg overflow-hidden">
+          <div className="max-h-64 overflow-y-auto p-3 font-mono text-[11px] space-y-0.5">
+            {logs.length === 0 ? (
+              <p className="text-gray-600 text-center py-4">No logs yet — start a call to see events</p>
+            ) : (
+              logs.map((l, i) => {
+                const time = new Date(l.ts).toLocaleTimeString('en-US', { hour12: false, fractionalSecondDigits: 3 });
+                return (
+                  <div key={i} className="flex gap-2 leading-relaxed">
+                    <span className="text-gray-600 flex-shrink-0">{time}</span>
+                    <span className={`flex-shrink-0 w-12 uppercase font-bold ${LOG_COLORS[l.level]}`}>{l.level}</span>
+                    <span className={`break-all ${l.level === 'error' ? 'text-red-300' : 'text-gray-300'}`}>{l.msg}</span>
+                  </div>
+                );
+              })
+            )}
+            <div ref={bottomRef} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Playground() {
   const [agents, setAgents] = useState<AgentListItem[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState('');
@@ -73,6 +129,7 @@ export default function Playground() {
   const [mode, setMode] = useState<PlaygroundMode>('text');
   const [audioAvailable, setAudioAvailable] = useState(false);
   const [audioProviders, setAudioProviders] = useState({ stt: '', tts: '' });
+  const [showLogs, setShowLogs] = useState(true);
 
   // Live call hook
   const liveCall = usePlaygroundCall();
@@ -512,6 +569,11 @@ export default function Playground() {
                     </button>
                   </div>
                 )}
+              </div>
+
+              {/* Live Logs Panel */}
+              <div className="px-6 pb-4">
+                <LiveLogPanel logs={liveCall.logs} show={showLogs} onToggle={() => setShowLogs(p => !p)} />
               </div>
             </>
           ) : (
