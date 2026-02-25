@@ -349,16 +349,25 @@ async def _process_and_respond(
 
     # TTS
     await _send_json(ws, {"type": "status", "status": "speaking"})
+    tts_provider = agent.tts_provider or "openai"
+    tts_voice = agent.tts_voice_id or ""
+    logger.info(f"TTS request: provider={tts_provider}, voice={tts_voice}, text_len={len(reply_text)}")
+
     tts_result = await tts.synthesize_speech(
         text=reply_text,
-        provider=agent.tts_provider or "openai",
-        voice_id=agent.tts_voice_id or "",
+        provider=tts_provider,
+        voice_id=tts_voice,
         config=agent.tts_config or {},
     )
 
     audio_b64 = ""
-    if tts_result.get("audio_data") and not tts_result.get("error"):
-        audio_b64 = base64.b64encode(tts_result["audio_data"]).decode("utf-8")
+    tts_error = tts_result.get("error")
+    audio_data = tts_result.get("audio_data", b"")
+    logger.info(f"TTS result: audio_bytes={len(audio_data) if audio_data else 0}, error={tts_error}")
+
+    if audio_data and not tts_error:
+        audio_b64 = base64.b64encode(audio_data).decode("utf-8")
+        logger.info(f"TTS base64 length: {len(audio_b64)}")
 
     await _send_json(ws, {
         "type": "agent_reply",

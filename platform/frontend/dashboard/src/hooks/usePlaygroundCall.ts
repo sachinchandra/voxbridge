@@ -47,36 +47,51 @@ export function usePlaygroundCall(): UsePlaygroundCallReturn {
     if (playingRef.current || audioQueueRef.current.length === 0) return;
     playingRef.current = true;
     const audio = audioQueueRef.current.shift()!;
+    console.log('[VoxCall] Playing audio from queue, remaining:', audioQueueRef.current.length);
     audio.onended = () => {
+      console.log('[VoxCall] Audio playback ended');
       playingRef.current = false;
       playNextAudio();
     };
-    audio.onerror = () => {
+    audio.onerror = (e) => {
+      console.error('[VoxCall] Audio playback error:', e);
       playingRef.current = false;
       playNextAudio();
     };
-    audio.play().catch(() => {
+    audio.play().then(() => {
+      console.log('[VoxCall] Audio play() started OK');
+    }).catch((err) => {
+      console.error('[VoxCall] Audio play() rejected:', err);
       playingRef.current = false;
       playNextAudio();
     });
   }, []);
 
   const queueAudio = useCallback((base64: string, contentType: string) => {
-    if (!base64) return;
-    const bytes = atob(base64);
-    const arr = new Uint8Array(bytes.length);
-    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
-    const blob = new Blob([arr], { type: contentType });
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    audio.onended = () => URL.revokeObjectURL(url);
-    audioQueueRef.current.push(audio);
-    playNextAudio();
+    if (!base64) {
+      console.warn('[VoxCall] queueAudio called with empty base64');
+      return;
+    }
+    console.log('[VoxCall] Queueing audio: base64 length =', base64.length, 'type =', contentType);
+    try {
+      const bytes = atob(base64);
+      const arr = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+      const blob = new Blob([arr], { type: contentType });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      audioQueueRef.current.push(audio);
+      playNextAudio();
+    } catch (err) {
+      console.error('[VoxCall] Error decoding/queueing audio:', err);
+    }
   }, [playNextAudio]);
 
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
       const data = JSON.parse(event.data);
+      console.log('[VoxCall] WS message:', data.type, data.type === 'agent_reply' ? `audio_len=${data.audio_base64?.length || 0}` : '');
 
       switch (data.type) {
         case 'status':
@@ -113,6 +128,8 @@ export function usePlaygroundCall(): UsePlaygroundCallReturn {
           });
           if (data.audio_base64) {
             queueAudio(data.audio_base64, data.audio_content_type || 'audio/mpeg');
+          } else {
+            console.warn('[VoxCall] agent_reply has no audio_base64');
           }
           break;
 
@@ -121,10 +138,13 @@ export function usePlaygroundCall(): UsePlaygroundCallReturn {
           break;
 
         case 'error':
+          console.error('[VoxCall] Server error:', data.message);
           setError(data.message);
           break;
       }
-    } catch {}
+    } catch (err) {
+      console.error('[VoxCall] Failed to parse WS message:', err);
+    }
   }, [queueAudio]);
 
   const startCall = useCallback(async (sessionId: string) => {
