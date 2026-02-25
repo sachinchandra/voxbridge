@@ -148,7 +148,13 @@ async def _run_with_deepgram_streaming(ws: WebSocket, session, agent, agent_conf
     utterance_buffer = ""
 
     try:
-        async with websockets.connect(dg_url, extra_headers=headers) as dg_ws:
+        # websockets v12+ uses `additional_headers`, older versions use `extra_headers`
+        try:
+            dg_ws = await websockets.connect(dg_url, additional_headers=headers)
+        except TypeError:
+            dg_ws = await websockets.connect(dg_url, extra_headers=headers)
+
+        async with dg_ws:
             logger.info("Deepgram streaming connected")
 
             async def _forward_audio():
