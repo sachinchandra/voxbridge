@@ -37,18 +37,21 @@ async def synthesize_speech(
     if not text.strip():
         return _empty_text_result(start)
 
-    if provider == "elevenlabs":
+    # Auto-fallback: if the requested provider's key is missing, try the other
+    if provider == "elevenlabs" and settings.elevenlabs_api_key:
         return await _synthesize_elevenlabs(text, voice_id, config or {}, start)
-    elif provider == "openai":
+    elif provider == "openai" and settings.openai_api_key:
         return await _synthesize_openai(text, voice_id, config or {}, start)
+
+    # Requested provider key missing — fallback to whichever key is available
+    if settings.openai_api_key:
+        logger.info(f"TTS fallback: {provider} key not set, using OpenAI")
+        return await _synthesize_openai(text, voice_id, config or {}, start)
+    elif settings.elevenlabs_api_key:
+        logger.info(f"TTS fallback: {provider} key not set, using ElevenLabs")
+        return await _synthesize_elevenlabs(text, voice_id, config or {}, start)
     else:
-        # Auto-select: prefer OpenAI (simpler), fallback to ElevenLabs
-        if settings.openai_api_key:
-            return await _synthesize_openai(text, voice_id, config or {}, start)
-        elif settings.elevenlabs_api_key:
-            return await _synthesize_elevenlabs(text, voice_id, config or {}, start)
-        else:
-            return _no_key_error(start)
+        return _no_key_error(start)
 
 
 async def _synthesize_openai(
