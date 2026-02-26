@@ -136,11 +136,12 @@ async def _run_with_deepgram_streaming(ws: WebSocket, session, agent, agent_conf
     """Full-duplex: browser audio → Deepgram streaming → LLM → TTS → browser."""
     import websockets
 
+    # NOTE: Do NOT specify encoding/sample_rate — browser sends audio/webm;codecs=opus
+    # Deepgram auto-detects the format from the container headers
     dg_url = (
         f"{DEEPGRAM_WS_URL}"
         f"?model=nova-2&language=en&smart_format=true&punctuate=true"
         f"&endpointing=300&utterance_end_ms=1000&interim_results=true"
-        f"&encoding=linear16&sample_rate=16000&channels=1"
     )
 
     dg_key = settings.deepgram_api_key.strip()
@@ -161,23 +162,29 @@ async def _run_with_deepgram_streaming(ws: WebSocket, session, agent, agent_conf
 
             async def _forward_audio():
                 """Forward browser audio to Deepgram."""
+                chunk_count = 0
                 try:
                     while True:
                         data = await ws.receive()
                         if data.get("type") == "websocket.disconnect":
+                            logger.info("Browser WS disconnected")
                             break
                         if "bytes" in data:
+                            chunk_count += 1
+                            if chunk_count <= 3 or chunk_count % 50 == 0:
+                                logger.info(f"Forwarding audio chunk #{chunk_count}: {len(data['bytes'])} bytes")
                             await dg_ws.send(data["bytes"])
                         elif "text" in data:
                             msg = json.loads(data["text"])
+                            logger.info(f"Browser text msg: {msg}")
                             if msg.get("action") == "end_call":
                                 break
                 except WebSocketDisconnect:
-                    pass
+                    logger.info("Browser WS disconnected (exception)")
                 except Exception as e:
-                    logger.error(f"Audio forward error: {e}")
+                    logger.error(f"Audio forward error: {type(e).__name__}: {e}")
                 finally:
-                    # Send close signal to Deepgram
+                    logger.info(f"Audio forward ended after {chunk_count} chunks")
                     try:
                         await dg_ws.send(json.dumps({"type": "CloseStream"}))
                     except Exception:
@@ -186,9 +193,13 @@ async def _run_with_deepgram_streaming(ws: WebSocket, session, agent, agent_conf
             async def _read_deepgram():
                 """Read Deepgram transcripts and process utterances."""
                 nonlocal utterance_buffer
+                msg_count = 0
                 try:
                     async for msg in dg_ws:
+                        msg_count += 1
                         data = json.loads(msg)
+                        if msg_count <= 5:
+                            logger.info(f"Deepgram msg #{msg_count}: type={data.get('type')}")
 
                         if data.get("type") == "Results":
                             alt = data.get("channel", {}).get("alternatives", [{}])[0]
@@ -228,10 +239,12 @@ async def _run_with_deepgram_streaming(ws: WebSocket, session, agent, agent_conf
                                         ws, session, agent, agent_config, full_text
                                     )
 
-                except websockets.exceptions.ConnectionClosed:
-                    pass
+                except websockets.exceptions.ConnectionClosed as e:
+                    logger.info(f"Deepgram WS closed: code={e.code} reason={e.reason}")
                 except Exception as e:
-                    logger.error(f"Deepgram read error: {e}")
+                    logger.error(f"Deepgram read error: {type(e).__name__}: {e}")
+                finally:
+                    logger.info(f"Deepgram read ended after {msg_count} messages")
 
             # Run both loops concurrently
             forward_task = asyncio.create_task(_forward_audio())
@@ -241,6 +254,14 @@ async def _run_with_deepgram_streaming(ws: WebSocket, session, agent, agent_conf
                 [forward_task, read_task],
                 return_when=asyncio.FIRST_COMPLETED,
             )
+
+            done_names = []
+            for t in done:
+                name = "forward" if t is forward_task else "deepgram_read"
+                exc = t.exception() if not t.cancelled() else None
+                done_names.append(f"{name}(exc={exc})")
+            pending_names = ["forward" if t is forward_task else "deepgram_read" for t in pending]
+            logger.info(f"Call loop ended — done={done_names}, pending={pending_names}")
 
             for task in pending:
                 task.cancel()
